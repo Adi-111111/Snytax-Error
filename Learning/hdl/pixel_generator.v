@@ -1,6 +1,7 @@
 module pixel_generator #(
     parameter AXI_LITE_ADDR_WIDTH = 8,
-    parameter REG_FILE_SIZE = 75
+    parameter REG_FILE_SIZE = 75,
+    parameter DEBUG_PORTS = 0
 )(
     input           out_stream_aclk,
     input           s_axi_lite_aclk,
@@ -33,7 +34,13 @@ module pixel_generator #(
 
     input  [31:0]   s_axi_lite_wdata,
     output          s_axi_lite_wready,
-    input           s_axi_lite_wvalid
+    input           s_axi_lite_wvalid,
+
+    // debug outputs — only used in testbench (DEBUG_PORTS=1)
+    output [7:0]    dbg_r,
+    output [7:0]    dbg_g,
+    output [7:0]    dbg_b,
+    output          dbg_valid
 );
 
     localparam X_SIZE = 640;
@@ -159,7 +166,7 @@ module pixel_generator #(
     // -----------------------------------------------------------------------
     reg [9:0] x;
     reg [8:0] y;
-    reg       first_start;
+    reg       first_start=0;
 
     wire first = (x == 0) && (y == 0);
     wire lastx = (x == X_SIZE - 1);
@@ -272,13 +279,9 @@ module pixel_generator #(
         .out_stream_tuser(out_stream_tuser)
     );
 
-    reg [31:0] cycle_count = 0;
-    always @(posedge out_stream_aclk) begin
-        cycle_count <= cycle_count + 1;
-        if (mlp_valid)
-            $display("Cycle %0d: mlp_valid fired x=%0d y=%0d", cycle_count, x, y);
-        if (lastx && mlp_valid)
-            $display("Cycle %0d: lastx AND mlp_valid both high", cycle_count);
-    end
+    assign dbg_r     = DEBUG_PORTS ? mlp_r     : 8'h0;
+    assign dbg_g     = DEBUG_PORTS ? mlp_g     : 8'h0;
+    assign dbg_b     = DEBUG_PORTS ? mlp_b     : 8'h0;
+    assign dbg_valid = DEBUG_PORTS ? mlp_valid : 1'b0;
 
 endmodule
