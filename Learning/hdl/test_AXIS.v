@@ -12,7 +12,7 @@ module pixgen_tb;
     parameter TIMEOUT = 10000;           //Time to wait for valid to be true
     parameter X_SIZE = 480;             //X dimension of image in words (words = pixels * 3/4)
     parameter Y_SIZE = 480;             //Y dimension of image
-    parameter ENDTIME = 10000000;       //End time of simulation
+    parameter ENDTIME = 70000000;       //End time of simulation
     parameter RND_SEED = 1246504138;    //Random seed for ready signal generation
     
     //Simulation configuration
