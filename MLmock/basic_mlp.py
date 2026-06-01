@@ -2,23 +2,23 @@ import torch
 import torch.nn as nn
 import numpy as np
 import json
+import colorsys
 from ucimlrepo import fetch_ucirepo
 
 H1     = 64
 H2     = 32
-EPOCHS = 1500
+EPOCHS = 2000
 LR     = 0.001
 
-CLASS_COLOURS = {
-    0: [200, 0,   0  ],
-    1: [0,   200, 0  ],
-    2: [0,   0,   200],
-    3: [200, 200, 0  ],
-    4: [200, 0,   200],
-    5: [0,   200, 200],
-    6: [200, 120, 0  ],
-}
+# Maximally distinct colours — evenly spaced hues at full saturation
+def make_colours(n):
+    colours = {}
+    for i in range(n):
+        r, g, b = colorsys.hsv_to_rgb(i / n, 1.0, 1.0)
+        colours[i] = [int(r * 255), int(g * 255), int(b * 255)]
+    return colours
 
+print("Fetching dry bean dataset...")
 data         = fetch_ucirepo(id=602)
 X_raw        = data.data.features.values.astype(np.float32)
 y_names      = data.data.targets.values.ravel()
@@ -33,6 +33,14 @@ X     = (X_raw - x_min) / (x_max - x_min + 1e-8)
 
 n_features = X.shape[1]
 n_classes  = len(classes)
+
+CLASS_COLOURS = make_colours(n_classes)
+
+print(f"Dataset: {len(X)} samples  {n_features} features  {n_classes} classes")
+print(f"Architecture: {n_features} -> {H1} -> {H2} -> 3")
+print("Class colours:")
+for i, name in enumerate(classes):
+    print(f"  {name}: {CLASS_COLOURS[i]}")
 
 colours = np.array([CLASS_COLOURS[i] for i in range(n_classes)], dtype=np.float32) / 255.0
 targets = torch.tensor(colours[y_raw], dtype=torch.float32)
@@ -52,15 +60,13 @@ for epoch in range(EPOCHS):
     loss = loss_fn(model(inputs), targets)
     loss.backward()
     optimiser.step()
-    if (epoch + 1) % 250 == 0:
+    if (epoch + 1) % 500 == 0:
         print(f"  Epoch {epoch+1}/{EPOCHS}  loss={loss.item():.6f}")
 
 with torch.no_grad():
     raw = model(inputs).numpy()
 
-# per-channel normalisation
-z_offsets = []
-z_scales  = []
+z_offsets, z_scales = [], []
 for k in range(3):
     ch_min = float(raw[:, k].min())
     ch_max = float(raw[:, k].max())
@@ -127,3 +133,11 @@ meta = {
 
 with open("weights_meta.json", "w") as f:
     json.dump(meta, f, indent=2)
+
+print("\nWeight clipping check:")
+for name, values in layers:
+    arr     = np.array(values)
+    clipped = int(np.sum(np.abs(arr) > 7.9375))
+    print(f"  {name}: min={arr.min():.3f}  max={arr.max():.3f}  clipped={clipped}")
+
+print("\nSaved weights.hex and weights_meta.json")
