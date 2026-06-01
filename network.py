@@ -164,13 +164,13 @@ class MLP_Torch(nn.Module):
         x = self.layer3(x) #no activation on the last layer
         return x
 
-    def fit(self, X, y, epochs=10000, lr=0.1, X_val=None, y_val=None):
-        #loss_fn = nn.CrossEntropyLoss()
-        #optimiser = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=1e-4)
-        #scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimiser, mode='min', factor=0.5, patience=50)
-        loss_fn = nn.MSELoss()
-        optimiser = torch.optim.SGD(self.parameters(), lr=lr)
-        y_onehot = torch.zeros(y.size(0), 7).scatter_(1, y.unsqueeze(1), 1.0)
+    def fit(self, X, y, epochs=1000, lr=0.1, X_val=None, y_val=None):
+        loss_fn = nn.CrossEntropyLoss()
+        optimiser = torch.optim.Adam(self.parameters(), lr=lr, weight_decay=1e-4)
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimiser, mode='min', factor=0.5, patience=50)
+        # loss_fn = nn.MSELoss()
+        # optimiser = torch.optim.SGD(self.parameters(), lr=lr)
+        # y_onehot = torch.zeros(y.size(0), 7).scatter_(1, y.unsqueeze(1), 1.0)
         accuracy_history = []
         time_history = []
         cumulative_time = 0
@@ -179,16 +179,16 @@ class MLP_Torch(nn.Module):
             epoch_start = time.time()
             logits = self(X)
             #loss = loss_fn(logits, y)
-            loss = loss_fn(logits, y_onehot)
+            loss = loss_fn(logits, y)
             optimiser.zero_grad()
             loss.backward()
             optimiser.step()
-            #scheduler.step(loss)
+            scheduler.step(loss)
             cumulative_time += time.time() - epoch_start
             time_history.append(cumulative_time)
             if X_val is not None:
                 accuracy_history.append(self.evaluate_float(X_val, y_val).item())
-            if epoch % 1000 == 0:
+            if epoch % 100 == 0:
                 #print(f"Epoch {epoch}, Loss: {loss.item():.4f}, LR: {scheduler.get_last_lr()[0]:.6f}")
                 print(f"Epoch {epoch}, Loss: {loss.item():.4f}")
         return accuracy_history, time_history
@@ -267,10 +267,10 @@ accuracy_quantised = model.evaluate_quantised(X_test, y_test)
 
 end = time.time()
 
-# print(f"Torch Accuracy (quantised Q4.4): {accuracy_quantised:.4f}")
-# print(f"Torch Accuracy drop: {(accuracy_float - accuracy_quantised):.4f}")
-# print(f"Total values to export: {len(weights)}")
-# print(f"Total time taken (Start of Training -> Export Weights): {end - start:.2f}s")
+print(f"Torch Accuracy (float): {accuracy_float:.4f}")
+print(f"Torch Accuracy (quantised Q4.4): {accuracy_quantised:.4f}")
+print(f"Torch Accuracy drop: {(accuracy_float - accuracy_quantised):.4f}")
+print(f"Total time taken (Start of Training -> Export Weights): {end - start:.2f}s")
 
 #MLP_Scratch on same data
 def to_one_hot(c, n=7):
@@ -294,7 +294,7 @@ scratch_accuracy = scratch_accuracy_history[-1]
 print(f"{'='*40}")
 print(f"{'':>10} {'Accuracy':>10} {'Train time':>12}")
 print(f"{'MLP_Scratch':>10} {scratch_accuracy:>10.4f} {scratch_train_time:>11.2f}s  (50 epochs, SGD)")
-print(f"{'MLP_Torch':>10} {accuracy_float.item():>10.4f} {torch_train_time:>11.2f}s  (10000 epochs, Adam)")
+print(f"{'MLP_Torch':>10} {accuracy_float.item():>10.4f} {torch_train_time:>11.2f}s  (1000 epochs, Adam)")
 print(f"{'='*40}")
 
 
