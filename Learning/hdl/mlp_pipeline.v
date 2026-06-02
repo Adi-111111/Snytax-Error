@@ -39,6 +39,12 @@ module mlp_pipeline #(
 
     integer j;
 
+    // Constant "1.0" fed on the bias cycle — one extra MAC step per layer.
+    // L1 uses Q0.15 scale (features: 0.5 = 16384); L2/L3 use Q0.15 (32767 ≈ 1.0).
+    // Training must scale bias weights accordingly.
+    localparam signed [15:0] BIAS_CONST_L1  = 16'sd32767;  // ≈1.0 in Q0.15, matches L2/L3 scale
+    localparam signed [31:0] BIAS_CONST_L23 = 32'sd32767;  // ≈1.0 in Q0.15
+
     // strip bank-select bits [15:14] before passing to weight RAMs
     // wr_addr[15:14] encodes which layer; the RAMs only need [13:0]
     wire [15:0] wr_addr_masked = {2'b00, wr_addr[13:0]};
@@ -129,7 +135,7 @@ module mlp_pipeline #(
         .start(l1_start),
         .in_val_flat(l1_in_val_flat),
         .weights_flat(l1_weights),
-        .n_inputs(7'(N_FEATURES)),
+        .n_inputs(7'(N_FEATURES + 1)),  // +1 for bias cycle
         .out(l1_out), .done(l1_done)
     );
 
@@ -159,7 +165,7 @@ module mlp_pipeline #(
         .start(l2_start),
         .in_val_flat(l2_in_val_flat),
         .weights_flat(l2_weights_flat),
-        .n_inputs(7'(H1_SIZE)),   // 64 — MAC will finish in 64/4=16 cycles
+        .n_inputs(7'(H1_SIZE + 1)),   // +1 for bias cycle (17 cycles total)
         .out(l2_out), .done(l2_done)
     );
 
@@ -187,7 +193,7 @@ module mlp_pipeline #(
         .start(l3_start),
         .in_val_flat(l3_in_val_flat),
         .weights_flat(l3_weights_flat),
-        .n_inputs(7'(H2_SIZE)),   // 32 — MAC will finish in 32/2=16 cycles
+        .n_inputs(7'(H2_SIZE + 1)),   // +1 for bias cycle (17 cycles total)
         .out(l3_out), .done(l3_done)
     );
 
@@ -230,14 +236,19 @@ module mlp_pipeline #(
 
             if (l1_running) begin
                 l1_rd_addr     <= l1_input_idx + 1;
-                l1_in_val_flat <= x[l1_input_idx];
+
+                // bias cycle: inject constant 1.0 instead of feature input
+                if (l1_input_idx == N_FEATURES)
+                    l1_in_val_flat <= BIAS_CONST_L1;
+                else
+                    l1_in_val_flat <= x[l1_input_idx];
 
                 if (l1_input_idx == 0)
                     l1_start <= 1;
 
                 l1_input_idx <= l1_input_idx + 1;
 
-                if (l1_input_idx == N_FEATURES - 1)
+                if (l1_input_idx == N_FEATURES)  // one extra cycle for bias
                     l1_running <= 0;
             end
 
@@ -256,7 +267,7 @@ module mlp_pipeline #(
     // -----------------------------------------------------------------------
     reg         l2_running;
     reg [5:0]   l2_in_idx;
-    reg [3:0]   l2_rd_cycle;
+    reg [4:0]   l2_rd_cycle;  // needs to count to H1_SIZE/4 = 16
 
     always @(posedge clk) begin
         l2_start <= 0;
@@ -279,19 +290,24 @@ module mlp_pipeline #(
             if (l2_running) begin
                 l2_rd_addr <= l2_rd_cycle + 1;
 
-                l2_in_val_flat <= {l1_buffer[l2_in_idx + 3],
-                                   l1_buffer[l2_in_idx + 2],
-                                   l1_buffer[l2_in_idx + 1],
-                                   l1_buffer[l2_in_idx + 0]};
+                // bias cycle: lane 0 = BIAS_CONST, lanes 1-3 = 0
+                // bias weights live in bank 0 row H1_SIZE/4; banks 1-3 add 0
+                if (l2_rd_cycle == H1_SIZE/4)
+                    l2_in_val_flat <= {96'h0, BIAS_CONST_L23};
+                else begin
+                    l2_in_val_flat <= {l1_buffer[l2_in_idx + 3],
+                                       l1_buffer[l2_in_idx + 2],
+                                       l1_buffer[l2_in_idx + 1],
+                                       l1_buffer[l2_in_idx + 0]};
+                    l2_in_idx <= l2_in_idx + 4;
+                end
 
                 if (l2_rd_cycle == 0)
                     l2_start <= 1;
 
-                l2_in_idx   <= l2_in_idx   + 4;
                 l2_rd_cycle <= l2_rd_cycle + 1;
 
-                // H1_SIZE/4 - 1 = 15 cycles
-                if (l2_rd_cycle == (H1_SIZE/4) - 1)
+                if (l2_rd_cycle == H1_SIZE/4)  // one extra cycle for bias
                     l2_running <= 0;
             end
 
@@ -310,7 +326,7 @@ module mlp_pipeline #(
     // -----------------------------------------------------------------------
     reg         l3_running;
     reg [4:0]   l3_in_idx;
-    reg [3:0]   l3_rd_cycle;
+    reg [4:0]   l3_rd_cycle;  // needs to count to H2_SIZE/2 = 16
 
     always @(posedge clk) begin
         l3_start <= 0;
@@ -334,18 +350,22 @@ module mlp_pipeline #(
             if (l3_running) begin
                 l3_rd_addr <= l3_rd_cycle + 1;
 
-                // truncate 48-bit l2_buffer values to 32 bits for L3 input
-                l3_in_val_flat <= {l2_buffer[l3_in_idx + 1][31:0],
-                                   l2_buffer[l3_in_idx + 0][31:0]};
+                // bias cycle: lane 0 = BIAS_CONST, lane 1 = 0
+                // bias weights live in bank 0 row H2_SIZE/2; bank 1 adds 0
+                if (l3_rd_cycle == H2_SIZE/2)
+                    l3_in_val_flat <= {32'h0, BIAS_CONST_L23};
+                else begin
+                    l3_in_val_flat <= {l2_buffer[l3_in_idx + 1][31:0],
+                                       l2_buffer[l3_in_idx + 0][31:0]};
+                    l3_in_idx <= l3_in_idx + 2;
+                end
 
                 if (l3_rd_cycle == 0)
                     l3_start <= 1;
 
-                l3_in_idx   <= l3_in_idx   + 2;
                 l3_rd_cycle <= l3_rd_cycle + 1;
 
-                // H2_SIZE/2 - 1 = 15 cycles
-                if (l3_rd_cycle == (H2_SIZE/2) - 1)
+                if (l3_rd_cycle == H2_SIZE/2)  // one extra cycle for bias
                     l3_running <= 0;
             end
 

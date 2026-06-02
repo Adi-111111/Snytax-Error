@@ -41,6 +41,14 @@ module weight_ram #(
     // memory: rows = DEPTH, columns = N_NEURONS bytes
     reg [7:0] mem [N_NEURONS-1:0][DEPTH-1:0];
 
+    // initialize to 0 so unwritten rows (e.g. bias row) behave like FPGA BRAM
+    integer init_n, init_d;
+    initial begin
+        for (init_n = 0; init_n < N_NEURONS; init_n = init_n + 1)
+            for (init_d = 0; init_d < DEPTH; init_d = init_d + 1)
+                mem[init_n][init_d] = 8'h0;
+    end
+
     integer j;
 
     // write — decode global column to bank-local row
