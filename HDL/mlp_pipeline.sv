@@ -22,11 +22,6 @@ module mlp_pipeline #(
     output logic        l1_advance_lx_out
 );
 
-    // -------------------------------------------------------
-    // Layer 1 BRAMs - 64 neurons split lo/hi (32 neurons each)
-    // Write port: 8-bit data, 10-bit address
-    // Read port:  256-bit data, 5-bit address
-    // -------------------------------------------------------
     logic [6:0]             l1_rd_addr;
     logic [(H1_SIZE*8)-1:0] l1_weights;
     logic [(H1_SIZE*8)-1:0] l1_weights_r;
@@ -62,11 +57,6 @@ module mlp_pipeline #(
     always_ff @(posedge clk)
         l1_weights_r <= l1_weights;
 
-    // -------------------------------------------------------
-    // Layer 2 BRAM - 32 neurons
-    // Write port: 8-bit data, 12-bit address
-    // Read port:  256-bit data, 7-bit address
-    // -------------------------------------------------------
     logic [6:0]             l2_rd_addr;
     logic [(H2_SIZE*8)-1:0] l2_weights;
     logic [(H2_SIZE*8)-1:0] l2_weights_r;
@@ -88,11 +78,6 @@ module mlp_pipeline #(
     always_ff @(posedge clk)
         l2_weights_r <= l2_weights;
 
-    // -------------------------------------------------------
-    // Layer 3 BRAM - 3 neurons
-    // Write port: 8-bit data, 7-bit address
-    // Read port:  32-bit data, 5-bit address
-    // -------------------------------------------------------
     logic [6:0]             l3_rd_addr;
     logic [(H3_SIZE*8)-1:0] l3_weights;
     logic [(H3_SIZE*8)-1:0] l3_weights_r;
@@ -117,9 +102,6 @@ module mlp_pipeline #(
     always_ff @(posedge clk)
         l3_weights_r <= l3_weights;
 
-    // -------------------------------------------------------
-    // Layer 1 MAC - 64 neurons, Q1.15 inputs, 32-bit accumulators
-    // -------------------------------------------------------
     logic               l1_start;
     logic signed [15:0] l1_in_val;
     logic signed [31:0] l1_out [H1_SIZE-1:0];
@@ -139,9 +121,6 @@ module mlp_pipeline #(
     logic signed [31:0] l1_buffer [H1_SIZE-1:0];
     logic               l1_buf_valid;
 
-    // -------------------------------------------------------
-    // Layer 2 MAC - 32 neurons, 32-bit inputs, 48-bit accumulators
-    // -------------------------------------------------------
     logic               l2_start;
     logic signed [31:0] l2_in_val;
     logic signed [47:0] l2_out [H2_SIZE-1:0];
@@ -160,9 +139,6 @@ module mlp_pipeline #(
 
     logic signed [47:0] l2_buffer [H2_SIZE-1:0];
 
-    // -------------------------------------------------------
-    // Layer 3 MAC - 3 neurons, 32-bit inputs, 48-bit accumulators, no ReLU
-    // -------------------------------------------------------
     logic               l3_start;
     logic signed [31:0] l3_in_val;
     logic signed [47:0] l3_out [H3_SIZE-1:0];
@@ -179,20 +155,12 @@ module mlp_pipeline #(
         .out(l3_out), .done(l3_done)
     );
 
-    // -------------------------------------------------------
-    // L1 early trigger - fires N_FEATURES+2 cycles before L2 finishes
-    // so L1 can complete before L2 needs the next pixel's result
-    // -------------------------------------------------------
     logic       l2_running;
     logic [6:0] l2_buf_idx;
 
     wire l1_early_trigger = l2_running && (l2_buf_idx == H1_SIZE - N_FEATURES - 2);
     assign l1_advance_lx_out = l1_early_trigger;
 
-    // -------------------------------------------------------
-    // Layer 1 control
-    // rd_addr sent 2 cycles ahead: 1 for BRAM latency + 1 for l1_weights_r register
-    // -------------------------------------------------------
     logic [4:0] l1_input_idx;
     logic       l1_running;
     logic       l1_stall;
@@ -237,10 +205,6 @@ module mlp_pipeline #(
         end
     end
 
-    // -------------------------------------------------------
-    // Layer 2 control
-    // rd_addr sent 2 cycles ahead: 1 for BRAM latency + 1 for l2_weights_r register
-    // -------------------------------------------------------
     always_ff @(posedge clk) begin
         l2_start <= 1'b0;
 
@@ -276,10 +240,6 @@ module mlp_pipeline #(
         end
     end
 
-    // -------------------------------------------------------
-    // Layer 3 control
-    // rd_addr sent 2 cycles ahead: 1 for BRAM latency + 1 for l3_weights_r register
-    // -------------------------------------------------------
     logic       l3_running;
     logic [5:0] l3_buf_idx;
 
@@ -313,14 +273,6 @@ module mlp_pipeline #(
         end
     end
 
-    // -------------------------------------------------------
-    // Normalisation - three pipeline stages to meet timing
-    //
-    // Stage 1 (l3_done):   subtract z_offset, register result
-    // Stage 2 (l3_done_r): multiply by z_scale and shift right 16, register result
-    // Stage 3 (l3_done_rr): clamp to [0,255] and output
-    // valid pulses two cycles after l3_done
-    // -------------------------------------------------------
     logic signed [47:0] r_sub, g_sub, b_sub;
     logic               l3_done_r;
 
