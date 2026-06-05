@@ -39,9 +39,9 @@ module mac_layer #(
     output reg                                  done
 );
 
-    reg signed [ACC_WIDTH-1:0]  accumulator [N_NEURONS-1:0];
-    reg signed [ACC_WIDTH-1:0]  final_mac   [N_NEURONS-1:0];
-    reg [6:0]                   count;       // counts processed inputs (0..N_INPUTS)
+    reg signed [ACC_WIDTH-1:0]  accumulator   [N_NEURONS-1:0];
+    reg signed [ACC_WIDTH-1:0]  final_mac     [N_NEURONS-1:0];
+    reg [6:0]                   count;
     reg                         running;
     integer                     i;
 
@@ -63,6 +63,9 @@ module mac_layer #(
     // log2(N_PARALLEL) extra bits; +3 handles up to N_PARALLEL=8
     localparam PAR_SUM_W = IN_WIDTH + 8 + 3;
 
+    // Pipeline register: breaks BRAM→DSP→CARRY4 into two shorter stages
+    reg signed [PAR_SUM_W-1:0]  par_sum_reg [N_NEURONS-1:0];
+
     // combinatorial parallel sum per neuron
     wire signed [PAR_SUM_W-1:0] par_sum [N_NEURONS-1:0];
     generate
@@ -82,26 +85,39 @@ module mac_layer #(
             done    <= 0;
             running <= 0;
             count   <= 0;
-            for (i = 0; i < N_NEURONS; i = i + 1)
-                accumulator[i] <= 0;
+            for (i = 0; i < N_NEURONS; i = i + 1) begin
+                accumulator[i]  <= 0;
+                par_sum_reg[i]  <= 0;
+            end
         end
 
         else begin
             done <= 0;
 
+            // Stage 1 register: captures combinatorial par_sum every cycle.
+            // Vivado now sees two short paths instead of one long one:
+            //   path A: BRAM → DSP multiply → par_sum_reg
+            //   path B: par_sum_reg → CARRY4 accumulate → accumulator
+            for (i = 0; i < N_NEURONS; i = i + 1)
+                par_sum_reg[i] <= par_sum[i];
+
             if (start) begin
                 running <= 1;
-                count   <= N_PARALLEL[6:0];
-                for (i = 0; i < N_NEURONS; i = i + 1)
-                    accumulator[i] <= par_sum[i];
+                count   <= 0;   // first accumulate deferred one cycle so par_sum_reg loads
             end
 
             else if (running) begin
-                if (count + N_PARALLEL[6:0] >= n_inputs) begin
+                if (count == 0) begin
+                    // par_sum_reg now holds the products from the start cycle
+                    for (i = 0; i < N_NEURONS; i = i + 1)
+                        accumulator[i] <= par_sum_reg[i];
+                    count <= N_PARALLEL[6:0];
+                end
+                else if (count + N_PARALLEL[6:0] >= n_inputs) begin
                     running <= 0;
                     done    <= 1;
                     for (i = 0; i < N_NEURONS; i = i + 1) begin
-                        final_mac[i] = accumulator[i] + par_sum[i];
+                        final_mac[i] = accumulator[i] + par_sum_reg[i];
                         if (APPLY_RELU && final_mac[i][ACC_WIDTH-1])
                             out[i] <= 0;
                         else
@@ -111,7 +127,7 @@ module mac_layer #(
                 else begin
                     count <= count + N_PARALLEL[6:0];
                     for (i = 0; i < N_NEURONS; i = i + 1)
-                        accumulator[i] <= accumulator[i] + par_sum[i];
+                        accumulator[i] <= accumulator[i] + par_sum_reg[i];
                 end
             end
         end

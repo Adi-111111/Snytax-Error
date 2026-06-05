@@ -125,12 +125,12 @@ module mlp_pipeline #(
     // -----------------------------------------------------------------------
     reg                             l1_start;
     reg  signed [15:0]              l1_in_val_flat;
-    wire signed [31:0]              l1_out [H1_SIZE-1:0];
+    wire signed [47:0]              l1_out [H1_SIZE-1:0];
     wire                            l1_done;
 
     mac_layer #(
         .N_INPUTS(N_FEATURES), .N_NEURONS(H1_SIZE), .APPLY_RELU(1),
-        .IN_WIDTH(16), .ACC_WIDTH(32), .N_PARALLEL(1)
+        .IN_WIDTH(16), .ACC_WIDTH(48), .N_PARALLEL(1)
     ) l1_mac (
         .clk(clk), .resetn(resetn),
         .start(l1_start),
@@ -212,31 +212,41 @@ module mlp_pipeline #(
     reg [4:0]   l1_input_idx;
     reg         l1_running;
     reg         l1_stall;
+    reg         l1_stall2;  // extra pre-load cycle for 2-stage BRAM read
 
     always @(posedge clk) begin
         l1_start     <= 0;
         l1_buf_valid <= 0;
         l1_stall     <= 0;
+        l1_stall2    <= 0;
 
         if (!resetn) begin
             l1_running   <= 0;
             l1_input_idx <= 0;
             l1_rd_addr   <= 0;
             l1_stall     <= 0;
+            l1_stall2    <= 0;
         end
 
         else begin
             if (start || l1_early_trigger)
                 l1_stall <= 1;
 
+            // stall: present addr 0 to BRAM, queue stall2
             if (l1_stall) begin
-                l1_running   <= 1;
+                l1_stall2    <= 1;
                 l1_input_idx <= 0;
                 l1_rd_addr   <= 0;
             end
 
+            // stall2: present addr 1 to BRAM, then start running
+            if (l1_stall2) begin
+                l1_running <= 1;
+                l1_rd_addr <= 1;
+            end
+
             if (l1_running) begin
-                l1_rd_addr     <= l1_input_idx + 1;
+                l1_rd_addr     <= l1_input_idx + 2;  // 2-cycle prefetch for 2-stage BRAM
 
                 // bias cycle: inject constant 1.0 instead of feature input
                 if (l1_input_idx == N_FEATURES)
@@ -255,7 +265,7 @@ module mlp_pipeline #(
 
             if (l1_done) begin
                 for (j = 0; j < H1_SIZE; j = j + 1)
-                    l1_buffer[j] <= l1_out[j];
+                    l1_buffer[j] <= l1_out[j][31:0];  // safe: ReLU bounds value to ~27 bits
                 l1_buf_valid <= 1;
             end
         end
@@ -267,29 +277,39 @@ module mlp_pipeline #(
     // l2_rd_cycle: weight bank read address, steps by 1 (0..15)
     // -----------------------------------------------------------------------
     reg         l2_running;
+    reg         l2_init;    // extra pre-load cycle for 2-stage BRAM read
     reg [5:0]   l2_in_idx;
     reg [4:0]   l2_rd_cycle;  // needs to count to H1_SIZE/4 = 16
 
     always @(posedge clk) begin
         l2_start <= 0;
+        l2_init  <= 0;
 
         if (!resetn) begin
             l2_running  <= 0;
+            l2_init     <= 0;
             l2_in_idx   <= 0;
             l2_rd_cycle <= 0;
             l2_rd_addr  <= 0;
         end
 
         else begin
+            // l1_buf_valid: present addr 0, queue init cycle
             if (l1_buf_valid) begin
-                l2_running  <= 1;
+                l2_init     <= 1;
                 l2_in_idx   <= 0;
                 l2_rd_cycle <= 0;
                 l2_rd_addr  <= 0;
             end
 
+            // init: present addr 1, then start running
+            if (l2_init) begin
+                l2_running <= 1;
+                l2_rd_addr <= 1;
+            end
+
             if (l2_running) begin
-                l2_rd_addr <= l2_rd_cycle + 1;
+                l2_rd_addr <= l2_rd_cycle + 2;  // 2-cycle prefetch
 
                 // bias cycle: lane 0 = BIAS_CONST, lanes 1-3 = 0
                 // bias weights live in bank 0 row H1_SIZE/4; banks 1-3 add 0
@@ -326,30 +346,40 @@ module mlp_pipeline #(
     // l3_rd_cycle: weight bank read address, steps by 1 (0..15)
     // -----------------------------------------------------------------------
     reg         l3_running;
+    reg         l3_init;    // extra pre-load cycle for 2-stage BRAM read
     reg [4:0]   l3_in_idx;
     reg [4:0]   l3_rd_cycle;  // needs to count to H2_SIZE/2 = 16
 
     always @(posedge clk) begin
         l3_start <= 0;
         valid    <= 0;
+        l3_init  <= 0;
 
         if (!resetn) begin
             l3_running  <= 0;
+            l3_init     <= 0;
             l3_in_idx   <= 0;
             l3_rd_cycle <= 0;
             l3_rd_addr  <= 0;
         end
 
         else begin
+            // l2_done: present addr 0, queue init cycle
             if (l2_done) begin
-                l3_running  <= 1;
+                l3_init     <= 1;
                 l3_in_idx   <= 0;
                 l3_rd_cycle <= 0;
                 l3_rd_addr  <= 0;
             end
 
+            // init: present addr 1, then start running
+            if (l3_init) begin
+                l3_running <= 1;
+                l3_rd_addr <= 1;
+            end
+
             if (l3_running) begin
-                l3_rd_addr <= l3_rd_cycle + 1;
+                l3_rd_addr <= l3_rd_cycle + 2;  // 2-cycle prefetch
 
                 // bias cycle: lane 0 = BIAS_CONST, lane 1 = 0
                 // bias weights live in bank 0 row H2_SIZE/2; bank 1 adds 0

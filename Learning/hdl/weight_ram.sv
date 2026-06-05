@@ -60,12 +60,19 @@ module weight_ram #(
         end
     endgenerate
 
+    // Two-stage read pipeline: breaks the long BRAM-output-to-DSP routing path.
+    // Stage 1 (inside BRAM): mem[rd_addr] → rd_data_r
+    // Stage 2 (extra flop):  rd_data_r    → rd_data
+    // Vivado places the extra flop near the DSPs, capping each stage at ~5ns.
+    reg [(N_NEURONS*8)-1:0] rd_data_r;
+
     always @(posedge clk) begin
         for (integer i = 0; i < N_NEURONS; i = i + 1) begin
             if (byte_we[i])
                 mem[local_row][i*8 +: 8] <= wr_data;
         end
-        rd_data <= mem[rd_addr];
+        rd_data_r <= mem[rd_addr];  // stage 1: BRAM registered read
+        rd_data   <= rd_data_r;     // stage 2: extra pipeline register
     end
 
 endmodule

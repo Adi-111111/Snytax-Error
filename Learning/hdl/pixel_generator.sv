@@ -171,7 +171,7 @@ module pixel_generator #(
     wire first = (x == 0) && (y == 0);
     wire lastx = (x == X_SIZE - 1);
     wire lasty = (y == Y_SIZE - 1);
-    wire ready = out_stream_tready;
+    wire ready;  // driven by packer.in_stream_ready (packer output port)
 
     // -----------------------------------------------------------------------
     // Lookahead counter — feeds input_builder, advances on l1_advance_lx_out
