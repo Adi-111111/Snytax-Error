@@ -40,6 +40,13 @@ module mlp_pipeline #(
     integer j;
     reg signed [63:0] r_norm, g_norm, b_norm;  // normalisation temporaries
 
+    // Output normalisation pipeline: 3 stages to break the
+    // l3_out→subtract→DSP_multiply→clamp→r_reg path (was 16.8ns).
+    reg signed [47:0] l3_diff    [H3_SIZE-1:0];  // stage 1: l3_out - z_offset
+    reg signed [63:0] l3_scaled  [H3_SIZE-1:0];  // stage 2: l3_diff * z_scale
+    reg               l3_diff_valid;
+    reg               l3_scaled_valid;
+
     // Constant "1.0" fed on the bias cycle — one extra MAC step per layer.
     // L1 uses Q0.15 scale (features: 0.5 = 16384); L2/L3 use Q0.15 (32767 ≈ 1.0).
     // Training must scale bias weights accordingly.
@@ -351,16 +358,20 @@ module mlp_pipeline #(
     reg [4:0]   l3_rd_cycle;  // needs to count to H2_SIZE/2 = 16
 
     always @(posedge clk) begin
-        l3_start <= 0;
-        valid    <= 0;
-        l3_init  <= 0;
+        l3_start        <= 0;
+        valid           <= 0;
+        l3_init         <= 0;
+        l3_diff_valid   <= 0;
+        l3_scaled_valid <= 0;
 
         if (!resetn) begin
-            l3_running  <= 0;
-            l3_init     <= 0;
-            l3_in_idx   <= 0;
-            l3_rd_cycle <= 0;
-            l3_rd_addr  <= 0;
+            l3_running      <= 0;
+            l3_init         <= 0;
+            l3_in_idx       <= 0;
+            l3_rd_cycle     <= 0;
+            l3_rd_addr      <= 0;
+            l3_diff_valid   <= 0;
+            l3_scaled_valid <= 0;
         end
 
         else begin
@@ -400,11 +411,26 @@ module mlp_pipeline #(
                     l3_running <= 0;
             end
 
+            // Stage 1: subtract z_offset — breaks the l3_out→DSP routing (was 1.8ns+1.4ns)
             if (l3_done) begin
+                for (j = 0; j < H3_SIZE; j = j + 1)
+                    l3_diff[j] <= l3_out[j] - z_offset;
+                l3_diff_valid <= 1;
+            end
+
+            // Stage 2: multiply by z_scale — isolates the 3-DSP cascade (~7.5ns) to its own stage
+            if (l3_diff_valid) begin
+                for (j = 0; j < H3_SIZE; j = j + 1)
+                    l3_scaled[j] <= l3_diff[j] * z_scale;
+                l3_scaled_valid <= 1;
+            end
+
+            // Stage 3: shift, clamp, output — only bit-selects + LUT mux on registered value
+            if (l3_scaled_valid) begin
                 valid  <= 1;
-                r_norm = ((l3_out[0] - z_offset) * z_scale) >> 16;
-                g_norm = ((l3_out[1] - z_offset) * z_scale) >> 16;
-                b_norm = ((l3_out[2] - z_offset) * z_scale) >> 16;
+                r_norm = l3_scaled[0] >> 16;
+                g_norm = l3_scaled[1] >> 16;
+                b_norm = l3_scaled[2] >> 16;
                 r <= (r_norm < 0) ? 8'd0 : (r_norm > 255) ? 8'd255 : r_norm[7:0];
                 g <= (g_norm < 0) ? 8'd0 : (g_norm > 255) ? 8'd255 : g_norm[7:0];
                 b <= (b_norm < 0) ? 8'd0 : (b_norm > 255) ? 8'd255 : b_norm[7:0];
