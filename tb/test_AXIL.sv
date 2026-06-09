@@ -1,7 +1,7 @@
 `timescale 1ns / 1ps
-module pixgen_tb;
+module pixgen_tb; 
 
-parameter REG_COUNT = 8;
+parameter REG_COUNT = 8; 
 
 reg clk = 0;
 reg rst = 0;
@@ -65,34 +65,34 @@ pixel_generator p1 (
   .s_axi_lite_wready(writeReady),
   .s_axi_lite_wvalid(writeValid));
 
-integer i = 0;
-  initial begin
-    $dumpfile("test.vcd");
-    $dumpvars(0,pixgen_tb);
-    #16 rst = 1;
+integer i = 0; 
+    initial begin 
+        $dumpfile("test.vcd");
+        $dumpvars(0, pixgen_tb);
+        #16 rst = 1; 
 
+        for(i = 0; i < REG_COUNT; i = i + 1) begin 
+            #40 writeAdd = i*4; 
+            writeData = i*32'h11111111; 
+            #20 writeAddValid = 1; 
+            #10 writeAddValid = 0; 
+            #20 writeValid = 1; 
+            #10 writeValid = 0; 
+            #20 respReady = 1; 
+            #10 respReady = 0; 
+        end 
 
-    for (i=0; i<REG_COUNT; i = i +1) begin
-    #40 writeAdd = i*4;
-      writeData = i*32'h11111111;
-    #20 writeAddValid = 1;
-    #10 writeAddValid = 0;
-    #20 writeValid = 1;
-    #10 writeValid = 0;
-    #20 respReady = 1;
-    #10 respReady = 0;
+        for(i = 0; i < REG_COUNT; i = i + 1) begin 
+            #40 readAdd = i*4; 
+            #20 readAddValid = 1; 
+            #10 readAddValid = 0; 
+            #20 readReady = 1; 
+            #10 readReady = 0; 
+            $display(readData); 
+        end 
+
+        #100 $finish;
     end
+endmodule 
 
-    for (i=0; i<REG_COUNT; i = i +1) begin
-    #40 readAdd = i*4;
-    #20 readAddValid = 1;
-    #10 readAddValid = 0;
-    #20 readReady = 1;
-    #10 readReady = 0;
-    $display(readData);
-    end
-
-    #100 $finish;
-  end
-
-endmodule
+             
