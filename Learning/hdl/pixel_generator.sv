@@ -40,7 +40,9 @@ module pixel_generator #(
     output [7:0]    dbg_r,
     output [7:0]    dbg_g,
     output [7:0]    dbg_b,
-    output          dbg_valid
+    output          dbg_valid,
+    output [9:0]    dbg_x,
+    output [8:0]    dbg_y
 );
 
     localparam X_SIZE = 640;
@@ -230,11 +232,24 @@ module pixel_generator #(
         .l1_advance_lx_out(l1_advance_lx_out)
     );
 
-    wire valid_int = mlp_valid;
+    // Pixel FIFO — absorbs MLP output during downstream backpressure
+    localparam FIFO_DEPTH = 128;
+    localparam FIFO_ABITS = 7;
 
-    // -----------------------------------------------------------------------
+    // packed as {r[7:0], g[7:0], b[7:0], eol, sof} = 26 bits
+    reg [25:0]           fifo_mem [FIFO_DEPTH-1:0];
+    reg [FIFO_ABITS-1:0] fifo_wr_ptr;
+    reg [FIFO_ABITS-1:0] fifo_rd_ptr;
+    reg [FIFO_ABITS:0]   fifo_count;
+
+    wire fifo_empty = (fifo_count == 0);
+    wire fifo_full  = (fifo_count == FIFO_DEPTH);
+    wire fifo_push  = mlp_valid && !fifo_full;
+    wire fifo_pop   = !fifo_empty && ready;  // ready = packer.in_stream_ready
+
+    wire [25:0] fifo_rd_data = fifo_mem[fifo_rd_ptr];
+
     // Raster counter control
-    // -----------------------------------------------------------------------
     always @(posedge out_stream_aclk) begin
         mlp_start <= 0;
 
@@ -242,6 +257,7 @@ module pixel_generator #(
             x           <= 0; y           <= 0;
             lx          <= 0; ly          <= 0;
             first_start <= 0;
+            fifo_wr_ptr <= 0; fifo_rd_ptr <= 0; fifo_count <= 0;
         end
         else begin
             if (!first_start) begin
@@ -255,22 +271,34 @@ module pixel_generator #(
                 else lx <= lx + 10'd1;
             end
 
-            // display counter follows pipeline output
-            if (mlp_valid && ready) begin
+            // push pixel into FIFO when MLP produces; capture eol/sof from
+            // current x/y then advance the display counter
+            if (fifo_push) begin
+                fifo_mem[fifo_wr_ptr] <= {mlp_r, mlp_g, mlp_b, lastx, first};
+                fifo_wr_ptr <= fifo_wr_ptr + 1;
                 if (lastx) begin x <= 10'd0; y <= lasty ? 9'd0 : y + 9'd1; end
                 else x <= x + 10'd1;
             end
+
+            // pop when packer consumes
+            if (fifo_pop)
+                fifo_rd_ptr <= fifo_rd_ptr + 1;
+
+            // update count (simultaneous push+pop leaves count unchanged)
+            case ({fifo_push, fifo_pop})
+                2'b10: fifo_count <= fifo_count + 1;
+                2'b01: fifo_count <= fifo_count - 1;
+                default: ;
+            endcase
         end
     end
 
-    // -----------------------------------------------------------------------
-    // Pixel packer
-    // -----------------------------------------------------------------------
+    // Pixel packer — reads from FIFO and produces AXI-Stream output, applying backpressure to the FIFO when needed
     packer pixel_packer (
         .aclk(out_stream_aclk), .aresetn(periph_resetn),
-        .r(mlp_r), .g(mlp_g), .b(mlp_b),
-        .eol(lastx), .in_stream_ready(ready),
-        .valid(valid_int), .sof(first),
+        .r(fifo_rd_data[25:18]), .g(fifo_rd_data[17:10]), .b(fifo_rd_data[9:2]),
+        .eol(fifo_rd_data[1]), .in_stream_ready(ready),
+        .valid(!fifo_empty), .sof(fifo_rd_data[0]),
         .out_stream_tdata(out_stream_tdata),
         .out_stream_tkeep(out_stream_tkeep),
         .out_stream_tlast(out_stream_tlast),
@@ -283,5 +311,7 @@ module pixel_generator #(
     assign dbg_g     = DEBUG_PORTS ? mlp_g     : 8'h0;
     assign dbg_b     = DEBUG_PORTS ? mlp_b     : 8'h0;
     assign dbg_valid = DEBUG_PORTS ? mlp_valid : 1'b0;
+    assign dbg_x     = DEBUG_PORTS ? x         : 10'h0;
+    assign dbg_y     = DEBUG_PORTS ? y         : 9'h0;
 
 endmodule
