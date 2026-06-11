@@ -154,8 +154,8 @@ class MLP_Scratch:
 class MLP_Torch(nn.Module): 
     def __init__(self): 
         super().__init__()
-        self.layer1 = nn.Linear(16, 64)
-        self.layer2 = nn.Linear(64, 32)
+        self.layer1 = nn.Linear(16, 32)
+        self.layer2 = nn.Linear(32, 32)
         self.layer3 = nn.Linear(32, 7)
 
     def forward(self, x):
