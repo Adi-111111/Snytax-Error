@@ -28,6 +28,7 @@ module mlp_pipeline #(
     // normalisation
     input  signed [31:0]            z_offset,
     input  [31:0]                   z_scale,
+    input  [4:0]                    z_shift,
 
     // outputs
     output reg [7:0]                r, g, b,
@@ -40,10 +41,15 @@ module mlp_pipeline #(
     integer j;
     reg signed [63:0] r_norm, g_norm, b_norm;  // normalisation temporaries
 
-    // Output normalisation pipeline: 3 stages to break the
-    // l3_out→subtract→DSP_multiply→clamp→r_reg path (was 16.8ns).
-    reg signed [47:0] l3_diff    [H3_SIZE-1:0];  // stage 1: l3_out - z_offset
-    reg signed [63:0] l3_scaled  [H3_SIZE-1:0];  // stage 2: l3_diff * z_scale
+    // Output normalisation pipeline: 4 stages.
+    // Stage 1: arithmetic right-shift by z_shift (collapses ±500B → ±hundreds)
+    // Stage 2: subtract z_offset (now fits in 32-bit signed)
+    // Stage 3: multiply z_scale
+    // Stage 4: >>16 + clamp → 8-bit RGB
+    reg signed [47:0] l3_shifted  [H3_SIZE-1:0];  // stage 1: l3_out >>> z_shift
+    reg signed [47:0] l3_diff     [H3_SIZE-1:0];  // stage 2: l3_shifted - z_offset
+    reg signed [63:0] l3_scaled   [H3_SIZE-1:0];  // stage 3: l3_diff * z_scale
+    reg               l3_shift_valid;
     reg               l3_diff_valid;
     reg               l3_scaled_valid;
 
@@ -361,6 +367,7 @@ module mlp_pipeline #(
         l3_start        <= 0;
         valid           <= 0;
         l3_init         <= 0;
+        l3_shift_valid  <= 0;
         l3_diff_valid   <= 0;
         l3_scaled_valid <= 0;
 
@@ -370,6 +377,7 @@ module mlp_pipeline #(
             l3_in_idx       <= 0;
             l3_rd_cycle     <= 0;
             l3_rd_addr      <= 0;
+            l3_shift_valid  <= 0;
             l3_diff_valid   <= 0;
             l3_scaled_valid <= 0;
         end
@@ -411,26 +419,33 @@ module mlp_pipeline #(
                     l3_running <= 0;
             end
 
-            // Stage 1: subtract z_offset — breaks the l3_out→DSP routing (was 1.8ns+1.4ns)
+            // Stage 1: arithmetic right-shift by z_shift — collapses ±500B accumulator
             if (l3_done) begin
                 for (j = 0; j < H3_SIZE; j = j + 1)
-                    l3_diff[j] <= l3_out[j] - z_offset;
+                    l3_shifted[j] <= $signed(l3_out[j]) >>> z_shift;
+                l3_shift_valid <= 1;
+            end
+
+            // Stage 2: subtract z_offset
+            if (l3_shift_valid) begin
+                for (j = 0; j < H3_SIZE; j = j + 1)
+                    l3_diff[j] <= l3_shifted[j] - z_offset;
                 l3_diff_valid <= 1;
             end
 
-            // Stage 2: multiply by z_scale — isolates the 3-DSP cascade (~7.5ns) to its own stage
+            // Stage 3: multiply by z_scale — $signed cast keeps negative l3_diff correct
             if (l3_diff_valid) begin
                 for (j = 0; j < H3_SIZE; j = j + 1)
-                    l3_scaled[j] <= l3_diff[j] * z_scale;
+                    l3_scaled[j] <= $signed(l3_diff[j]) * $signed({1'b0, z_scale});
                 l3_scaled_valid <= 1;
             end
 
-            // Stage 3: shift, clamp, output — only bit-selects + LUT mux on registered value
+            // Stage 4: >>>16 + clamp → RGB (arithmetic shift preserves sign for negative channels)
             if (l3_scaled_valid) begin
                 valid  <= 1;
-                r_norm = l3_scaled[0] >> 16;
-                g_norm = l3_scaled[1] >> 16;
-                b_norm = l3_scaled[2] >> 16;
+                r_norm = l3_scaled[0] >>> 16;
+                g_norm = l3_scaled[1] >>> 16;
+                b_norm = l3_scaled[2] >>> 16;
                 r <= (r_norm < 0) ? 8'd0 : (r_norm > 255) ? 8'd255 : r_norm[7:0];
                 g <= (g_norm < 0) ? 8'd0 : (g_norm > 255) ? 8'd255 : g_norm[7:0];
                 b <= (b_norm < 0) ? 8'd0 : (b_norm > 255) ? 8'd255 : b_norm[7:0];

@@ -88,6 +88,7 @@ module pixel_generator #(
         regfile[71] = 32'd0;
         regfile[72] = 32'd0;
         regfile[73] = 32'd65536;
+        regfile[74] = 32'd16;
     end
 
     wire signed [15:0] feature_regs [N_FEATURES-1:0];
@@ -104,7 +105,8 @@ module pixel_generator #(
     wire [7:0]  weight_data   = regfile[70][7:0];
     wire        weight_we     = regfile[71][0];
     wire signed [31:0] z_offset = regfile[72];
-    wire [31:0] z_scale       = regfile[73];
+    wire [31:0] z_scale        = regfile[73];
+    wire [4:0]  z_shift        = regfile[74][4:0];
 
     // -----------------------------------------------------------------------
     // AXI-Lite read state machine
@@ -227,6 +229,7 @@ module pixel_generator #(
         .wr_bank(wr_bank),
         .z_offset(z_offset),
         .z_scale(z_scale),
+        .z_shift(z_shift),
         .r(mlp_r), .g(mlp_g), .b(mlp_b),
         .valid(mlp_valid),
         .l1_advance_lx_out(l1_advance_lx_out)
