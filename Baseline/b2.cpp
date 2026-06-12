@@ -73,22 +73,13 @@ void forward_layer(
     }
 }
 
-// Softmax-weighted colour blend
-// Network outputs 3 raw logits. We interpret them as class scores,
-// apply softmax to get class probabilities, then blend the 7 class
-// colours using those probabilities. This gives vivid saturated colours
-// deep in each class region and smooth transitions at boundaries.
 void logits_to_rgb(const float z[3], const float z_offset[3], const float z_scale[3],
                    int& r, int& g, int& b)
 {
-    // Normalise each logit channel to [0,1] using per-channel scale
     float norm[3];
     for (int k = 0; k < 3; k++)
         norm[k] = clamp_float((z[k] - z_offset[k]) * z_scale[k] / 255.0f, 0.0f, 1.0f);
 
-    // Use the normalised values as weights to blend class colours
-    // The 3 output dimensions encode a position in a learned colour space
-    // Simple clamp and output — the network learned to map to the right colours
     r = clamp_int((int)std::round(norm[0] * 255.0f), 0, 255);
     g = clamp_int((int)std::round(norm[1] * 255.0f), 0, 255);
     b = clamp_int((int)std::round(norm[2] * 255.0f), 0, 255);
