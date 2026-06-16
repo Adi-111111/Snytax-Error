@@ -26,6 +26,7 @@ module tb_weight_ram;
         .rd_data(rd_data)
     );
 
+    // weight writing task for simplicity
     task write_weight;
         input [7:0] neuron;
         input [7:0] input_idx;
@@ -45,7 +46,7 @@ module tb_weight_ram;
         $dumpvars(0, tb_weight_ram);
 
         // TEST 1 - write known weights and read them back
-        // write weight 1.0 (=16 in Q4.4) for all neurons at input 0
+        // write weight 1.0 (= 16 in Q4.4) for all neurons at input 0
         #20;
         write_weight(0, 0, 8'sd16);  // neuron 0, input 0 = 1.0
         write_weight(1, 0, 8'sd32);  // neuron 1, input 0 = 2.0
@@ -60,9 +61,9 @@ module tb_weight_ram;
         #1;
 
         $display("TEST 1 - read column 0");
-        $display("Neuron 0 weight: %0d expected 16  -- %s", $signed(rd_data[0  +: 8]), $signed(rd_data[0  +: 8]) ==  16 ? "PASS" : "FAIL");
-        $display("Neuron 1 weight: %0d expected 32  -- %s", $signed(rd_data[8  +: 8]), $signed(rd_data[8  +: 8]) ==  32 ? "PASS" : "FAIL");
-        $display("Neuron 2 weight: %0d expected 8   -- %s", $signed(rd_data[16 +: 8]), $signed(rd_data[16 +: 8]) ==   8 ? "PASS" : "FAIL");
+        $display("Neuron 0 weight: %0d expected 16  -- %s", $signed(rd_data[0 +: 8]), $signed(rd_data[0 +: 8]) == 16 ? "PASS" : "FAIL");
+        $display("Neuron 1 weight: %0d expected 32  -- %s", $signed(rd_data[8 +: 8]), $signed(rd_data[8 +: 8]) == 32 ? "PASS" : "FAIL");
+        $display("Neuron 2 weight: %0d expected 8   -- %s", $signed(rd_data[16 +: 8]), $signed(rd_data[16 +: 8]) == 8 ? "PASS" : "FAIL");
         $display("Neuron 3 weight: %0d expected -16 -- %s", $signed(rd_data[24 +: 8]), $signed(rd_data[24 +: 8]) == -16 ? "PASS" : "FAIL");
 
         // TEST 2 - write and read biases (at column N_INPUTS)

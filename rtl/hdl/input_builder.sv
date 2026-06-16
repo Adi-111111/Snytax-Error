@@ -20,8 +20,8 @@ module input_builder #(
 );
 
     // precomputed reciprocals in Q1.15
-    // 1/639 × 32768 = 51.28 → 51
-    // 1/479 × 32768 = 68.41 → 68
+    // 1/639 x 32768 = 51.28, rounds to 51
+    // 1/479 x 32768 = 68.41, rounds to 68
     localparam [15:0] INV_639 = 16'd51;
     localparam [15:0] INV_479 = 16'd68;
 

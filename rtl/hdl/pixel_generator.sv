@@ -36,7 +36,7 @@ module pixel_generator #(
     output          s_axi_lite_wready,
     input           s_axi_lite_wvalid,
 
-    // debug outputs — only used in testbench (DEBUG_PORTS=1)
+    // debug outputs - only used in testbench (DEBUG_PORTS=1)
     output [7:0]    dbg_r,
     output [7:0]    dbg_g,
     output [7:0]    dbg_b,
@@ -65,9 +65,7 @@ module pixel_generator #(
     localparam AXI_OK  = 2'b00;
     localparam AXI_ERR = 2'b10;
 
-    // -----------------------------------------------------------------------
     // Register file
-    // -----------------------------------------------------------------------
     reg [31:0] regfile [REG_FILE_SIZE-1:0];
     reg [REG_FILE_AWIDTH-1:0] writeAddr, readAddr;
     reg [31:0]                readData, writeData;
@@ -108,9 +106,7 @@ module pixel_generator #(
     wire [31:0] z_scale        = regfile[73];
     wire [4:0]  z_shift        = regfile[74][4:0];
 
-    // -----------------------------------------------------------------------
     // AXI-Lite read state machine
-    // -----------------------------------------------------------------------
     always @(posedge s_axi_lite_aclk) begin
         readData <= regfile[readAddr];
         if (!axi_resetn) begin
@@ -136,9 +132,7 @@ module pixel_generator #(
     assign s_axi_lite_rvalid  = (readState == AWAIT_READ);
     assign s_axi_lite_rdata   = readData;
 
-    // -----------------------------------------------------------------------
     // AXI-Lite write state machine
-    // -----------------------------------------------------------------------
     always @(posedge s_axi_lite_aclk) begin
         if (!axi_resetn) begin
             writeState <= AWAIT_WADD_AND_DATA;
@@ -165,9 +159,7 @@ module pixel_generator #(
     assign s_axi_lite_bvalid  = (writeState == AWAIT_RESP);
     assign s_axi_lite_bresp   = (writeAddr < REG_FILE_SIZE) ? AXI_OK : AXI_ERR;
 
-    // -----------------------------------------------------------------------
     // Display raster counter
-    // -----------------------------------------------------------------------
     reg [9:0] x;
     reg [8:0] y;
     reg       first_start=0;
@@ -177,17 +169,13 @@ module pixel_generator #(
     wire lasty = (y == Y_SIZE - 1);
     wire ready;  // driven by packer.in_stream_ready (packer output port)
 
-    // -----------------------------------------------------------------------
-    // Lookahead counter — feeds input_builder, advances on l1_advance_lx_out
-    // -----------------------------------------------------------------------
+    // Lookahead counter - feeds input_builder, advances on l1_advance_lx_out
     reg [9:0] lx;
     reg [8:0] ly;
     wire      llastx = (lx == X_SIZE - 1);
     wire      llasty = (ly == Y_SIZE - 1);
 
-    // -----------------------------------------------------------------------
     // Input builder
-    // -----------------------------------------------------------------------
     wire signed [15:0] input_vec [N_FEATURES-1:0];
 
     input_builder #(.N_FEATURES(N_FEATURES)) ib (
@@ -200,10 +188,8 @@ module pixel_generator #(
         .x(input_vec)
     );
 
-    // -----------------------------------------------------------------------
     // MLP pipeline
     // wr_bank encoding: 0=L1, 1=L2 (all 4 banks decode internally), 2=L3
-    // -----------------------------------------------------------------------
     wire [7:0]  mlp_r, mlp_g, mlp_b;
     wire        mlp_valid;
     reg         mlp_start;
@@ -235,7 +221,7 @@ module pixel_generator #(
         .l1_advance_lx_out(l1_advance_lx_out)
     );
 
-    // Pixel FIFO — absorbs MLP output during downstream backpressure
+    // Pixel FIFO - absorbs MLP output during downstream backpressure
     localparam FIFO_DEPTH = 128;
     localparam FIFO_ABITS = 7;
 
@@ -296,7 +282,7 @@ module pixel_generator #(
         end
     end
 
-    // Pixel packer — reads from FIFO and produces AXI-Stream output, applying backpressure to the FIFO when needed
+    // Pixel packer - reads from FIFO and produces AXI-Stream output, applying backpressure to the FIFO when needed
     packer pixel_packer (
         .aclk(out_stream_aclk), .aresetn(periph_resetn),
         .r(fifo_rd_data[25:18]), .g(fifo_rd_data[17:10]), .b(fifo_rd_data[9:2]),

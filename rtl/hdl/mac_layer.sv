@@ -1,16 +1,14 @@
-// mac_layer.v
-// Parameterised MAC layer with optional parallel input processing.
+// Multiply accumulation with parallel input parameter.
 //
-// N_PARALLEL = 1  -> original single-input behaviour (L1)
-// N_PARALLEL = 4  -> 4 inputs processed per cycle (L2, 64/4=16 cycles)
-// N_PARALLEL = 2  -> 2 inputs processed per cycle (L3, 32/2=16 cycles)
+// N_PARALLEL = 1 -> 1 input per cycle (16 cycles)
+// N_PARALLEL = 4 -> 4 inputs per cycle (64/4=16 cycles)
+// N_PARALLEL = 2 -> 2 inputs per cycle (32/2=16 cycles)
 //
-// n_inputs is the FULL input count — the module divides by N_PARALLEL
-// internally. So for L2 pass n_inputs=H1_SIZE=64, not H1_SIZE/4.
+// n_inputs is the number of inputs to a given layer.
+// Cycles = n_inputs / N_PARALLEL
 //
-// Counter starts at N_PARALLEL on the start cycle (first group already
-// processed), increments by N_PARALLEL each running cycle, fires done
-// when count >= n_inputs.
+// Counter starts at N_PARALLEL on the start cycle (first group processes before),
+// increments by N_PARALLEL each running cycle, then fires done when count >= n_inputs.
 
 module mac_layer #(
     parameter N_INPUTS    = 16,
@@ -24,15 +22,15 @@ module mac_layer #(
     input                                       resetn,
     input                                       start,
 
-    // flattened input bus: N_PARALLEL inputs packed LSB-first
-    // in_val_flat[p*IN_WIDTH +: IN_WIDTH] = input p
+    // flattened input bus consisting of N_PARALLEL input columns
+    // e.g. in_val_flat[p*IN_WIDTH +: IN_WIDTH] = column p of input
     input  signed [(N_PARALLEL*IN_WIDTH)-1:0]   in_val_flat,
 
-    // flattened weight bus: N_PARALLEL weight columns packed
+    // flattened weight bus has N_PARALLEL weight columns
     // weights_flat[p*N_NEURONS*8 + i*8 +: 8] = weight for parallel p, neuron i
     input  [(N_PARALLEL*N_NEURONS*8)-1:0]       weights_flat,
 
-    // full input count (mac divides by N_PARALLEL internally); 7 bits holds up to 128
+    // absolute number of inputs to mac layer, (not divided by N_PARALLEL)
     input  [6:0]                                n_inputs,
 
     output reg signed [ACC_WIDTH-1:0]           out [N_NEURONS-1:0],
@@ -45,7 +43,7 @@ module mac_layer #(
     reg                         running;
     integer                     i;
 
-    // unpack individual weights and inputs via generate
+    // arrays for inputs and weights to be unpacked
     wire signed [7:0]          w  [N_PARALLEL-1:0][N_NEURONS-1:0];
     wire signed [IN_WIDTH-1:0] iv [N_PARALLEL-1:0];
 
@@ -59,14 +57,14 @@ module mac_layer #(
         end
     endgenerate
 
-    // parallel sum width: product is IN_WIDTH+8 bits, sum of N_PARALLEL needs
-    // log2(N_PARALLEL) extra bits; +3 handles up to N_PARALLEL=8
+    // parallel sum width - product width is IN_WIDTH+8 bits,
+    // then having +3 provides room for sum of N_PARALLEL terms
     localparam PAR_SUM_W = IN_WIDTH + 8 + 3;
 
-    // Pipeline register: breaks BRAM→DSP→CARRY4 into two shorter stages
+    // Pipeline register adds stage for parallel accumulation
     reg signed [PAR_SUM_W-1:0]  par_sum_reg [N_NEURONS-1:0];
 
-    // combinatorial parallel sum per neuron
+    // sum of neurons in parallel
     wire signed [PAR_SUM_W-1:0] par_sum [N_NEURONS-1:0];
     generate
         for (gi = 0; gi < N_NEURONS; gi = gi + 1) begin : gen_psum
@@ -94,16 +92,14 @@ module mac_layer #(
         else begin
             done <= 0;
 
-            // Stage 1 register: captures combinatorial par_sum every cycle.
-            // Vivado now sees two short paths instead of one long one:
-            //   path A: BRAM → DSP multiply → par_sum_reg
-            //   path B: par_sum_reg → CARRY4 accumulate → accumulator
+            // Register captures par_sum every cycle,
+            // splits computation into BRAM/DSP stage, then carry4 accumulate
             for (i = 0; i < N_NEURONS; i = i + 1)
                 par_sum_reg[i] <= par_sum[i];
 
             if (start) begin
                 running <= 1;
-                count   <= 0;   // first accumulate deferred one cycle so par_sum_reg loads
+                count   <= 0;
             end
 
             else if (running) begin

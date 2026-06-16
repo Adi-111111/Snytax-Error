@@ -40,25 +40,30 @@ module tb_input_builder;
 
         #20 resetn = 1;
 
+        // x select = 0, y select = 1
+
         // TEST 1 - middle of screen
-        // axis_x=0, axis_y=1
-        // x[0] should be pixel_x/639 = 320/639 ≈ 0.5
-        // x[1] should be pixel_y/479 = 240/479 ≈ 0.5
-        // x[2] should be feature_regs[2] = 0.75
-        // x[3] should be feature_regs[3] = ~1.0
+        // Expected values (Q1.15)
+        // x[0] should be pixel_x/639 = 320/639 ~ 0.5
+        // x[1] should be pixel_y/479 = 240/479 ~ 0.5
+        // x[2] should be feature_regs[2] ~ 0.75
+        // x[3] should be feature_regs[3] ~ 1.0
         pixel_x = 320;
         pixel_y = 240;
         @(posedge clk);
         @(posedge clk); // one cycle latency
         #1;
         $display("TEST 1 - middle of screen");
+        // inequalities here used to account for fixed point approximation
         $display("x[0] = %0d expected ~16320 (0.498) -- %s", x[0], (x[0] > 16000 && x[0] < 16500) ? "PASS" : "FAIL");
         $display("x[1] = %0d expected ~16320 (0.498) -- %s", x[1], (x[1] > 16000 && x[1] < 16500) ? "PASS" : "FAIL");
         $display("x[2] = %0d expected 24576 (0.75)  -- %s", x[2], x[2] == 24576 ? "PASS" : "FAIL");
         $display("x[3] = %0d expected 32767 (~1.0)  -- %s", x[3], x[3] == 32767 ? "PASS" : "FAIL");
 
         // TEST 2 - top left corner
-        // x[0] should be 0, x[1] should be 0
+        // Expected values
+        // x[0] should be 0
+        // x[1] should be 0
         pixel_x = 0;
         pixel_y = 0;
         @(posedge clk);
@@ -69,7 +74,9 @@ module tb_input_builder;
         $display("x[1] = %0d expected 0 -- %s", x[1], x[1] == 0 ? "PASS" : "FAIL");
 
         // TEST 3 - bottom right corner
-        // x[0] should be ~32767, x[1] should be ~32767
+        // Expected values (Q1.15)
+        // x[0] should be ~ 1
+        // x[1] should be ~ 1
         pixel_x = 639;
         pixel_y = 479;
         @(posedge clk);

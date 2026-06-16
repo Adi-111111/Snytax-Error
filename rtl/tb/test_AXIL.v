@@ -7,7 +7,7 @@ reg clk = 0;
 reg rst = 0;
 always #5 clk = !clk;
 
-// AXI Stream -- connected but not the focus of this test
+// AXI Stream - connected but not the focus of this test
 wire [31:0] dataOut;
 wire [3:0]  keep;
 wire        last, valid, user;
@@ -36,7 +36,7 @@ reg         respReady     = 0;
 wire [1:0]  respData;
 wire        respValid;
 
-// debug outputs -- open (DUT drives 0 when DEBUG_PORTS=0)
+// debug outputs - open (DUT drives 0 when DEBUG_PORTS=0)
 wire [7:0] dbg_r, dbg_g, dbg_b;
 wire       dbg_valid;
 wire [9:0] dbg_x;
@@ -109,7 +109,7 @@ task axi_write;
         @(posedge clk);
         while (!respValid) @(posedge clk);
         @(negedge clk); respReady = 1;
-        @(posedge clk);   // bvalid & bready both high -- handshake done
+        @(posedge clk);   // bvalid & bready both high - handshake done
         @(negedge clk); respReady = 0;
     end
 endtask
@@ -123,14 +123,14 @@ task axi_read;
     output [31:0] data;
     begin
         @(negedge clk);
-        readAdd      = addr;
+        readAdd = addr;
         readAddValid = 1;
 
         @(posedge clk);
         while (!readAddReady) @(posedge clk);
         @(negedge clk); readAddValid = 0;
 
-        // wait for rvalid; assert rready at negedge so it's stable before the
+        // wait for rvalid - assert rready at negedge so its stable before the
         // next posedge where the DUT samples it and transitions to AWAIT_RADD
         @(posedge clk);
         while (!readValid) @(posedge clk);
@@ -151,49 +151,50 @@ initial begin
     rst = 1;
     repeat(2) @(posedge clk);
 
-    // -- Write REG_COUNT general registers ----------------------------------
-    $display("=== AXI-Lite write (regs 0..%0d) ===", REG_COUNT-1);
+    // Write REG_COUNT general registers
+    $display("AXI-Lite write (regs 0..%0d)", REG_COUNT-1);
     for (i = 0; i < REG_COUNT; i = i+1) begin
         axi_write(i*4, i * 32'h11111111);
-        $display("  wrote reg[%0d] = %08h", i, i * 32'h11111111);
+        $display("wrote reg[%0d] = %08h", i, i * 32'h11111111);
     end
 
-    // -- Read back and verify -----------------------------------------------
-    $display("=== AXI-Lite read-back ===");
+    // Read back and verify
+    $display("AXI-Lite read-back");
     for (i = 0; i < REG_COUNT; i = i+1) begin
         axi_read(i*4, rdback);
         expected = i * 32'h11111111;
-        if (rdback !== expected) begin
-            $display("  FAIL reg[%0d]: expected=%08h  got=%08h", i, expected, rdback);
+        if (rdback != expected) begin
+            $display("FAIL reg[%0d]: expected=%08h  got=%08h", i, expected, rdback);
             errors = errors + 1;
         end else
-            $display("  PASS reg[%0d] = %08h", i, rdback);
+            $display("PASS reg[%0d] = %08h", i, rdback);
     end
 
-    // -- Weight register path (byte addr = reg_idx*4; reg 64 = addr 0x100) --
+    // Weight register path (byte addr = reg_idx*4; reg 64 = addr 0x100)
     // Weight regs require 9-bit address (bit 8 set); unreachable with 8-bit addr.
-    $display("=== Weight register write/read (reg 64 @ addr 0x100) ===");
-    axi_write(9'h100, 32'hDEAD_BEEF);
+    $display("Weight register write/read (reg 64 @ addr 0x100)");
+    axi_write(9'h100, 32'hDEADBEEF);
     axi_read (9'h100, rdback);
-    if (rdback !== 32'hDEAD_BEEF) begin
-        $display("  FAIL reg[64]: expected=deadbeef  got=%08h", rdback);
+    if (rdback != 32'hDEADBEEF) begin
+        $display("FAIL reg[64]: expected=deadbeef  got=%08h", rdback);
         errors = errors + 1;
     end else
-        $display("  PASS reg[64] = %08h", rdback);
+        $display("PASS reg[64] = %08h", rdback);
 
-    axi_write(9'h114, 32'h0000_3C0F);   // reg 69 -- weight_addr
-    axi_write(9'h118, 32'h0000_007F);   // reg 70 -- weight_data (int8 = 127)
-    axi_write(9'h11C, 32'h0000_0001);   // reg 71 -- assert weight_we
-    axi_write(9'h11C, 32'h0000_0000);   // reg 71 -- clear weight_we
+    axi_write(9'h114, 32'h00003C0F); // reg 69 - weight_addr
+    axi_write(9'h118, 32'h0000007F); // reg 70 - weight_data
+    axi_write(9'h11C, 32'h00000001); // reg 71 - assert weight_we
+    axi_write(9'h11C, 32'h00000000); // reg 71 - clear weight_we
 
     axi_read(9'h114, rdback);
-    if (rdback !== 32'h0000_3C0F) begin
-        $display("  FAIL reg[69] weight_addr: expected=00003c0f  got=%08h", rdback);
+    if (rdback != 32'h00003C0F) begin
+        $display("FAIL reg[69] weight_addr: expected=00003c0f  got=%08h", rdback);
         errors = errors + 1;
     end else
-        $display("  PASS reg[69] weight_addr = %08h", rdback);
+        $display("PASS reg[69] weight_addr = %08h", rdback);
 
-    // -- Summary ------------------------------------------------------------
+
+
     if (errors == 0)
         $display("All AXI-Lite handshake tests PASSED.");
     else
