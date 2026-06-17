@@ -1,0 +1,992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPGA Neural Visualiser</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+ --bg: #0c0c0c;
+ --s1: #141414;
+ --s2: #1c1c1c;
+ --border: #222;
+ --border2: #2e2e2e;
+ --text: #e8e8e8;
+ --dim: #888;
+ --muted: #444;
+ --accent: #4b8ef0;
+ --asoft: rgba(75,142,240,0.08);
+ --green: #3ecf74;
+ --red: #f06060;
+ --amber: #e09940;
+}
+
+body.light {
+ --bg: #f4f4f6;
+ --s1: #ffffff;
+ --s2: #eeeeef;
+ --border: #e0e0e2;
+ --border2: #d0d0d3;
+ --text: #1a1a1a;
+ --dim: #555;
+ --muted: #888;
+ --accent: #3878d0;
+ --asoft: rgba(56,120,208,0.08);
+ --green: #28a854;
+ --red: #d44;
+ --amber: #c88020;
+}
+
+body {
+ font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+ background: var(--bg);
+ color: var(--text);
+ height: 100vh;
+ display: flex;
+ flex-direction: column;
+ overflow: hidden;
+ font-size: 13px;
+ transition: background 0.2s, color 0.2s;
+}
+
+/* header */
+header {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ padding: 0 16px;
+ height: 42px;
+ background: var(--s1);
+ border-bottom: 1px solid var(--border);
+ flex-shrink: 0;
+}
+header h1 { font-size: 13px; font-weight: 500; }
+
+.dot {
+ width: 6px; height: 6px; border-radius: 50%;
+ background: var(--muted); flex-shrink: 0; transition: background 0.3s, box-shadow 0.3s;
+}
+.dot.training { background: var(--amber); box-shadow: 0 0 5px var(--amber); }
+.dot.ready { background: var(--green); box-shadow: 0 0 5px var(--green); }
+.dot.error { background: var(--red); }
+
+#status-text { font-size: 11px; color: var(--muted); transition: color 0.3s; }
+#status-text.training { color: var(--amber); }
+#status-text.ready { color: var(--green); }
+#status-text.error { color: var(--red); }
+
+#theme-btn {
+ margin-left: auto;
+ background: none; border: 1px solid var(--border2);
+ border-radius: 5px; color: var(--dim);
+ padding: 3px 8px; font-size: 12px; cursor: pointer;
+ transition: border-color 0.15s, color 0.15s;
+}
+#theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+/* layout */
+.layout {
+ display: grid;
+ grid-template-columns: 210px 1fr 230px;
+ flex: 1;
+ overflow: hidden;
+ min-height: 0;
+}
+
+/* sidebar */
+.sidebar {
+ background: var(--s1);
+ border-right: 1px solid var(--border);
+ display: flex; flex-direction: column;
+ overflow-y: auto; overflow-x: hidden;
+ transition: background 0.2s;
+}
+.sidebar::-webkit-scrollbar { width: 3px; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+.panel { padding: 11px 13px; border-bottom: 1px solid var(--border); }
+.panel-title {
+ font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
+ text-transform: uppercase; color: var(--muted); margin-bottom: 9px;
+}
+
+/* drop zone */
+#drop-zone {
+ border: 1px dashed var(--border2); border-radius: 6px;
+ padding: 13px 10px; text-align: center; cursor: pointer;
+ color: var(--muted); transition: border-color 0.15s, background 0.15s;
+ user-select: none;
+}
+#drop-zone:hover, #drop-zone.hover { border-color: var(--accent); background: var(--asoft); }
+#drop-zone svg { display: block; margin: 0 auto 6px; opacity: 0.3; }
+#drop-zone:hover svg, #drop-zone.hover svg { opacity: 0.6; }
+#drop-zone p { font-size: 11px; }
+#drop-zone small { font-size: 10px; color: var(--muted); display: block; margin-top: 2px; opacity: 0.7; }
+#filename { margin-top: 6px; font-size: 11px; color: var(--accent); min-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#file-input { display: none; }
+
+#train-btn {
+ width: 100%; padding: 7px; margin-top: 8px;
+ border: none; border-radius: 5px;
+ background: var(--accent); color: #fff;
+ font-size: 12px; font-weight: 600; cursor: pointer;
+ transition: opacity 0.15s, background 0.15s;
+}
+#train-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+#train-btn:not(:disabled):hover { filter: brightness(1.1); }
+#train-btn.training { background: transparent; border: 1px solid var(--border2); color: var(--muted); cursor: not-allowed; filter: none; }
+
+#error-box {
+ margin-top: 7px; font-size: 10px; color: var(--red);
+ background: rgba(240,80,80,0.05); border: 1px solid rgba(240,80,80,0.2);
+ border-radius: 5px; padding: 6px 8px; display: none;
+ line-height: 1.5; word-break: break-word;
+}
+
+/* axes */
+.axis-row { display: flex; align-items: center; gap: 5px; margin-bottom: 6px; }
+.axis-row:last-child { margin-bottom: 0; }
+.axis-label { font-size: 10px; font-weight: 700; color: var(--muted); width: 12px; flex-shrink: 0; }
+
+select {
+ flex: 1; min-width: 0; padding: 4px 20px 4px 7px;
+ background: var(--bg); border: 1px solid var(--border2);
+ border-radius: 5px; color: var(--text); font-size: 11px; cursor: pointer;
+ appearance: none;
+ background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%23666'/%3E%3C/svg%3E");
+ background-repeat: no-repeat; background-position: right 6px center;
+ transition: background 0.2s, border-color 0.15s;
+}
+select:focus { outline: none; border-color: var(--accent); }
+select:disabled { opacity: 0.2; cursor: not-allowed; }
+
+.probe-input {
+ width: 64px; flex-shrink: 0;
+ padding: 4px 5px;
+ background: var(--bg); border: 1px solid var(--border2);
+ border-radius: 5px; color: var(--accent);
+ font-size: 11px; font-family: 'Consolas', monospace;
+ text-align: right; transition: border-color 0.15s, background 0.2s;
+}
+.probe-input:focus { outline: none; border-color: var(--accent); }
+.probe-input:disabled { opacity: 0.2; }
+
+
+/* virtual joystick */
+.joystick-card {
+ margin-top: 10px;
+ padding: 10px;
+ border: 1px solid var(--border);
+ border-radius: 8px;
+ background: linear-gradient(180deg, var(--bg), var(--s1));
+}
+.joy-wrap { display: flex; align-items: center; gap: 12px; }
+#joy-zone {
+ width: 122px; height: 122px; border-radius: 12px;
+ position: relative; flex-shrink: 0; touch-action: none; cursor: grab;
+ border: 2px solid var(--border2);
+ background:
+ radial-gradient(circle at center, rgba(75,142,240,0.12) 0 2px, transparent 3px),
+ linear-gradient(90deg, transparent 49%, rgba(255,255,255,0.10) 50%, transparent 51%),
+ linear-gradient(0deg, transparent 49%, rgba(255,255,255,0.10) 50%, transparent 51%),
+ linear-gradient(135deg, rgba(255,255,255,0.045), transparent 70%);
+}
+#joy-zone:active { cursor: grabbing; }
+#joy-knob {
+ position: absolute; width: 22px; height: 22px; border-radius: 50%;
+ left: 50%; top: 50%; transform: translate(-50%, -50%);
+ background: var(--accent); border: 3px solid rgba(255,255,255,0.88);
+ box-shadow: 0 0 12px rgba(75,142,240,0.75);
+ pointer-events: none;
+}
+.joy-readout { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 7px; }
+.readout-line { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; }
+.readout-line span:first-child { color: var(--muted); }
+.readout-line b { color: var(--accent); font-family: 'Consolas', monospace; font-weight: 700; }
+.readout-line.y b { color: var(--green); }
+#center-joy {
+ width: 100%; margin-top: 9px; padding: 6px 8px; border-radius: 6px;
+ border: 1px solid var(--border2); color: var(--text); background: var(--s2);
+ cursor: pointer; font-size: 11px;
+}
+#center-joy:hover { border-color: var(--accent); }
+
+/* sliders */
+.slider-list { display: flex; flex-direction: column; gap: 7px; }
+.slider-row .row-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 3px; }
+.feat-name { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+.feat-val { font-size: 10px; font-variant-numeric: tabular-nums; color: var(--accent); flex-shrink: 0; }
+.axis-tag { font-size: 10px; color: var(--amber); opacity: 0.8; }
+
+input[type=range] {
+ -webkit-appearance: none; width: 100%;
+ height: 2px; background: var(--border2); border-radius: 1px; outline: none; cursor: pointer;
+}
+input[type=range]::-webkit-slider-thumb {
+ -webkit-appearance: none; width: 11px; height: 11px;
+ border-radius: 50%; background: var(--accent); cursor: pointer; transition: transform 0.1s;
+}
+input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.3); }
+input[type=range]:disabled { opacity: 0.15; cursor: not-allowed; }
+
+/* center */
+.center {
+ display: flex; flex-direction: column;
+ align-items: center; justify-content: center;
+ gap: 10px; padding: 16px 20px;
+ overflow: hidden; min-width: 0;
+}
+
+.diagram-header {
+ display: flex; align-items: center; justify-content: space-between;
+ width: 100%;
+}
+.diagram-label { font-size: 10px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; }
+
+#diagram {
+ width: 100%; height: auto;
+ border-radius: 5px; display: block;
+}
+
+/* output row */
+.output-row {
+ display: flex; align-items: center; gap: 12px;
+ width: 100%; padding: 10px 12px;
+ background: var(--s1); border: 1px solid var(--border);
+ border-radius: 6px;
+}
+#swatch {
+ width: 42px; height: 42px; border-radius: 5px;
+ background: var(--s2); flex-shrink: 0;
+ transition: background 0.15s; border: 1px solid var(--border2);
+}
+.output-info { display: flex; flex-direction: column; gap: 2px; }
+.out-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+#rgb-text { font-size: 12px; font-family: 'Consolas', monospace; color: var(--text); }
+#hex-text { font-size: 11px; color: var(--dim); }
+#nearest-class {
+ font-size: 11px; color: var(--accent); margin-top: 2px;
+}
+
+/* right panel */
+.right-panel {
+ background: var(--s1); border-left: 1px solid var(--border);
+ display: flex; flex-direction: column; overflow: hidden; overflow-y: auto;
+ transition: background 0.2s;
+}
+.right-panel::-webkit-scrollbar { width: 3px; }
+.right-panel::-webkit-scrollbar-thumb { background: var(--border2); }
+.right-panel .panel { flex-shrink: 0; }
+.right-panel .panel:last-child { flex: 1; overflow-y: auto; }
+
+.imp-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.imp-name { font-size: 10px; color: var(--dim); width: 72px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.imp-track { flex: 1; height: 3px; background: var(--border2); border-radius: 2px; overflow: hidden; }
+.imp-fill { height: 100%; background: var(--accent); border-radius: 2px; width: 0%; transition: width 0.15s; }
+.imp-val { font-size: 9px; color: var(--muted); font-variant-numeric: tabular-nums; width: 22px; text-align: right; flex-shrink: 0; }
+
+/* legend */
+.legend-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+.legend-row:last-child { margin-bottom: 0; }
+.legend-swatch {
+ width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0;
+ border: 1px solid var(--border2);
+}
+.legend-name { font-size: 11px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.legend-empty { font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+ <h1>FPGA Neural Visualiser</h1>
+ <div class="dot" id="dot"></div>
+ <span id="status-text">idle</span>
+ <button id="theme-btn">☀ Light</button>
+</header>
+
+<div class="layout">
+
+ <aside class="sidebar">
+ <div class="panel">
+ <div class="panel-title">Dataset</div>
+ <div id="drop-zone" onclick="document.getElementById('file-input').click()">
+ <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+ <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+ <polyline points="17 8 12 3 7 8"/>
+ <line x1="12" y1="3" x2="12" y2="15"/>
+ </svg>
+ <p>Drop CSV or click to browse</p>
+ <small>Row 1 = headers · last col = label</small>
+ <div id="filename"></div>
+ </div>
+ <input type="file" id="file-input" accept=".csv">
+ <button id="train-btn" disabled>Train</button>
+ <div id="error-box"></div>
+ </div>
+
+ <div class="panel" id="axis-panel" style="display:none">
+ <div class="panel-title">Control Crosshair</div>
+ <div class="axis-row">
+ <span class="axis-label">X</span>
+ <select id="sel-x" disabled></select>
+ </div>
+ <div class="axis-row">
+ <span class="axis-label">Y</span>
+ <select id="sel-y" disabled></select>
+ </div>
+ <div class="joystick-card">
+ <div class="joy-wrap">
+ <div id="joy-zone" aria-label="Virtual joystick">
+ <div id="joy-knob"></div>
+ </div>
+ <div class="joy-readout">
+ <div class="readout-line"><span>X norm</span><b id="norm-x">0.500</b></div>
+ <div class="readout-line y"><span>Y norm</span><b id="norm-y">0.500</b></div>
+ <div class="readout-line"><span>X raw</span><b id="raw-x">—</b></div>
+ <div class="readout-line y"><span>Y raw</span><b id="raw-y">—</b></div>
+ </div>
+ </div>
+ <button id="center-joy" type="button">Center Crosshair</button>
+ </div>
+ </div>
+
+ <div class="panel" id="params-panel" style="display:none">
+ <div class="panel-title">Parameters</div>
+ <div class="slider-list" id="slider-list"></div>
+ </div>
+ </aside>
+
+ <main class="center">
+ <div class="diagram-header">
+ <span class="diagram-label">Laptop preview: neurons and sampled RGB</span>
+ </div>
+ <canvas id="diagram" width="520" height="300"></canvas>
+ <div class="output-row">
+ <div id="swatch"></div>
+ <div class="output-info">
+ <span class="out-label">Network RGB at crosshair</span>
+ <span id="rgb-text">—</span>
+ <span id="hex-text"></span>
+ <span id="nearest-class"></span>
+ </div>
+ </div>
+ </main>
+
+ <aside class="right-panel">
+ <div class="panel">
+ <div class="panel-title">Feature Influence</div>
+ <div id="imp-list"></div>
+ </div>
+ <div class="panel">
+ <div class="panel-title">Colour Legend</div>
+ <div id="legend-list"><span class="legend-empty">—</span></div>
+ </div>
+ </aside>
+
+</div>
+
+<script>
+"use strict";
+
+// canvas layout constants (drawing space = 520×300)
+const CW = 520, CH = 300;
+const COL_X = [14, 154, 294, 434];
+const BAR_W = 62;
+const Y0 = 26, Y1 = 290;
+const BAR_H = Y1 - Y0;
+const L2_BIAS_SCALE = 1 / 16;
+const L3_BIAS_SCALE = 1 / 256;
+const FPGA_SEND_MS = 35;
+const CROSSHAIR_SEND_MS = 16;
+
+const canvas = document.getElementById("diagram");
+const ctx = canvas.getContext("2d");
+
+// app state
+let csvFile = null, meta = null, trainPoll = null;
+let fpgaPending = {};
+let fpgaDirty = false;
+let fpgaPumpRunning = false;
+let probeX = 0.5, probeY = 0.5;
+let localFeatures = null;
+let jsWeights = null;
+let classNames = [];
+let classColours = {}; 
+let isDark = true;
+
+drawEmpty();
+
+// theme
+
+document.getElementById("theme-btn").addEventListener("click", () => {
+ isDark = !isDark;
+ document.body.classList.toggle("light", !isDark);
+ document.getElementById("theme-btn").textContent = isDark ? "☀ Light" : "☾ Dark";
+ if (jsWeights && localFeatures) runJSPredict();
+ else drawEmpty();
+});
+
+//file handling
+
+const dropZone = document.getElementById("drop-zone");
+const fileInput = document.getElementById("file-input");
+
+["dragover","dragenter"].forEach(e =>
+ dropZone.addEventListener(e, ev => { ev.preventDefault(); dropZone.classList.add("hover"); }));
+["dragleave","drop"].forEach(e =>
+ dropZone.addEventListener(e, () => dropZone.classList.remove("hover")));
+dropZone.addEventListener("drop", e => {
+ e.preventDefault();
+ const f = e.dataTransfer.files[0];
+ if (f?.name.toLowerCase().endsWith(".csv")) pickFile(f);
+});
+fileInput.addEventListener("change", e => { if (e.target.files[0]) pickFile(e.target.files[0]); });
+
+function pickFile(f) {
+ csvFile = f;
+ document.getElementById("filename").textContent = f.name;
+ document.getElementById("train-btn").disabled = false;
+ document.getElementById("error-box").style.display = "none";
+}
+
+//train
+
+document.getElementById("train-btn").addEventListener("click", async () => {
+ if (!csvFile) return;
+ const form = new FormData();
+ form.append("csv", csvFile);
+
+ setStatus("training", "training…");
+ const btn = document.getElementById("train-btn");
+ btn.disabled = true; btn.classList.add("training"); btn.textContent = "Training…";
+
+ const res = await fetch("/upload", { method: "POST", body: form });
+ const data = await res.json();
+ if (!res.ok || data.error) {
+ showError(data.error || "upload failed");
+ setStatus("idle", "idle"); resetBtn(); return;
+ }
+ pollTraining();
+});
+
+function pollTraining() {
+ clearInterval(trainPoll);
+ trainPoll = setInterval(async () => {
+ const d = await fetch("/status").then(r => r.json());
+ if (d.state === "training") {
+ setStatus("training", `training · ${d.elapsed}s`);
+ } else if (d.state === "ready") {
+ clearInterval(trainPoll);
+ onReady(d);
+ } else if (d.state === "error") {
+ clearInterval(trainPoll); setStatus("error", "error"); showError(d.msg); resetBtn();
+ }
+ }, 1000);
+}
+
+// model ready
+
+async function onReady(data) {
+ meta = data;
+ setStatus("ready", "ready");
+ resetBtn();
+
+ buildSelects(data);
+ buildSliders(data);
+ buildImpList(data.feature_names);
+
+ classNames = data.class_names ?? [];
+ classColours = data.class_colours ?? {};
+ buildLegend();
+
+ document.getElementById("axis-panel").style.display = "block";
+ document.getElementById("params-panel").style.display = "block";
+
+ localFeatures = [...(data.features ?? new Array(data.n_features).fill(0.5))];
+ probeX = localFeatures[data.axis_x ?? 0] ?? 0.5;
+ probeY = localFeatures[data.axis_y ?? 1] ?? 0.5;
+ setupJoystick();
+ updateProbeInputs();
+
+ // load weights into JS for real-time forward pass
+ const wd = await fetch("/weights_data").then(r => r.json());
+ if (!wd.error) {
+ jsWeights = wd;
+ runJSPredict();
+ }
+}
+
+// axis selects
+
+function buildSelects(data) {
+ ["sel-x","sel-y"].forEach(id => {
+ const s = document.getElementById(id);
+ s.innerHTML = "";
+ data.feature_names.forEach((n, i) => s.innerHTML += `<option value="${i}">${n}</option>`);
+ s.disabled = false;
+ });
+ const nsx = refreshSelect("sel-x", data.axis_x ?? 0);
+ const nsy = refreshSelect("sel-y", data.axis_y ?? 1);
+ nsx.addEventListener("change", () => changeAxis("x", +nsx.value));
+ nsy.addEventListener("change", () => changeAxis("y", +nsy.value));
+}
+
+function refreshSelect(id, val) {
+ const old = document.getElementById(id);
+ const fresh = old.cloneNode(true);
+ fresh.value = String(val);
+ old.replaceWith(fresh);
+ return fresh;
+}
+
+async function changeAxis(axis, idx) {
+ const other = axis === "x"
+ ? +document.getElementById("sel-y").value
+ : +document.getElementById("sel-x").value;
+ if (idx === other) {
+ refreshSelect(axis === "x" ? "sel-x" : "sel-y", axis === "x" ? (meta.axis_x ?? 0) : (meta.axis_y ?? 1));
+ return;
+ }
+ const d = await fetch("/axis", {
+ method: "POST", headers: { "Content-Type": "application/json" },
+ body: JSON.stringify({ axis, index: idx })
+ }).then(r => r.json());
+ if (d.ok) {
+ if (axis === "x") meta.axis_x = idx; else meta.axis_y = idx;
+ probeX = localFeatures?.[meta.axis_x ?? 0] ?? probeX;
+ probeY = localFeatures?.[meta.axis_y ?? 1] ?? probeY;
+ buildSliders(meta);
+ updateProbeInputs();
+ runJSPredict();
+ queueProbe(probeX, probeY);
+ }
+}
+
+// probe inputs
+
+function updateProbeInputs() {
+ if (!meta) return;
+ const ax_x = meta.axis_x ?? 0, ax_y = meta.axis_y ?? 1;
+ const rawX = meta.feature_min[ax_x] + probeX * (meta.feature_max[ax_x] - meta.feature_min[ax_x]);
+ const rawY = meta.feature_min[ax_y] + probeY * (meta.feature_max[ax_y] - meta.feature_min[ax_y]);
+ document.getElementById("norm-x").textContent = probeX.toFixed(3);
+ document.getElementById("norm-y").textContent = probeY.toFixed(3);
+ document.getElementById("raw-x").textContent = fmtRaw(rawX, meta.feature_min[ax_x], meta.feature_max[ax_x]);
+ document.getElementById("raw-y").textContent = fmtRaw(rawY, meta.feature_min[ax_y], meta.feature_max[ax_y]);
+ positionJoystickKnob();
+}
+
+function setProbeFromNorm(xn, yn, send=true) {
+ if (!meta) return;
+ probeX = Math.max(0, Math.min(1, xn));
+ probeY = Math.max(0, Math.min(1, yn));
+ if (localFeatures) {
+ localFeatures[meta.axis_x ?? 0] = probeX;
+ localFeatures[meta.axis_y ?? 1] = probeY;
+ }
+ updateProbeInputs();
+ runJSPredict();
+ if (send) {
+ queueProbe(probeX, probeY);
+ }
+}
+
+function positionJoystickKnob() {
+ const knob = document.getElementById("joy-knob");
+ if (!knob) return;
+ const zone = document.getElementById("joy-zone");
+ const r = zone.clientWidth / 2;
+ const x = probeX * 2 - 1;
+ const y = probeY * 2 - 1;
+ knob.style.left = `${r + x * (r - 13)}px`;
+ knob.style.top = `${r + y * (r - 13)}px`;
+}
+
+function setupJoystick() {
+ const zone = document.getElementById("joy-zone");
+ const center = document.getElementById("center-joy");
+ if (!zone || zone.dataset.ready) return;
+ zone.dataset.ready = "1";
+ let dragging = false;
+ function updateFromEvent(e) {
+ const rect = zone.getBoundingClientRect();
+ const cx = rect.left + rect.width / 2;
+ const cy = rect.top + rect.height / 2;
+ let dx = (e.clientX - cx) / (rect.width / 2 - 13);
+ let dy = (e.clientY - cy) / (rect.height / 2 - 13);
+ dx = Math.max(-1, Math.min(1, dx));
+ dy = Math.max(-1, Math.min(1, dy));
+ setProbeFromNorm((dx + 1) / 2, (dy + 1) / 2, true);
+ }
+ zone.addEventListener("pointerdown", e => { dragging = true; zone.setPointerCapture(e.pointerId); updateFromEvent(e); });
+ zone.addEventListener("pointermove", e => { if (dragging) updateFromEvent(e); });
+ zone.addEventListener("pointerup", e => { dragging = false; try { zone.releasePointerCapture(e.pointerId); } catch {} });
+ zone.addEventListener("pointercancel", () => { dragging = false; });
+ center.addEventListener("click", () => setProbeFromNorm(0.5, 0.5, true));
+}
+
+
+let probePending = null;
+let probeDirty = false;
+let probePumpRunning = false;
+
+function queueProbe(xNorm, yNorm) {
+ probePending = { x: xNorm, y: yNorm };
+ probeDirty = true;
+ if (!probePumpRunning) probePump();
+}
+
+async function probePump() {
+ probePumpRunning = true;
+
+ while (probeDirty) {
+ probeDirty = false;
+ const body = probePending;
+ await fetch("/probe", {
+ method: "POST",
+ headers: { "Content-Type": "application/json" },
+ body: JSON.stringify(body)
+ }).catch(err => console.warn("probe write failed", err));
+
+ await new Promise(resolve => setTimeout(resolve, CROSSHAIR_SEND_MS));
+ }
+
+ probePumpRunning = false;
+}
+
+function queueFeature(i, norm) {
+ fpgaPending[i] = norm;
+ fpgaDirty = true;
+ if (!fpgaPumpRunning) fpgaPump();
+}
+
+async function fpgaPump() {
+ fpgaPumpRunning = true;
+
+ while (fpgaDirty) {
+ fpgaDirty = false;
+ const batch = { ...fpgaPending };
+
+ for (const [idx, norm] of Object.entries(batch)) {
+ await fetch("/feature", {
+ method: "POST",
+ headers: { "Content-Type": "application/json" },
+ body: JSON.stringify({ index: +idx, value: norm })
+ }).catch(err => console.warn("FPGA feature write failed", err));
+ }
+
+ await new Promise(resolve => setTimeout(resolve, FPGA_SEND_MS));
+ }
+
+ fpgaPumpRunning = false;
+}
+
+function pushAxisProbe(idx, norm) {
+ queueFeature(idx, norm);
+}
+
+// sliders
+
+function buildSliders(data) {
+ const list = document.getElementById("slider-list");
+ list.innerHTML = "";
+ const ax_x = data.axis_x ?? 0, ax_y = data.axis_y ?? 1;
+ const vals = data.features ?? new Array(data.feature_names.length).fill(0.5);
+
+ data.feature_names.forEach((name, i) => {
+ const isAxis = i === ax_x || i === ax_y;
+ const div = document.createElement("div");
+ div.className = "slider-row";
+ if (isAxis) {
+ div.innerHTML = `<div class="row-head"><span class="feat-name">${esc(name)}</span><span class="axis-tag">${i === ax_x ? "x" : "y"}</span></div>`;
+ } else {
+ const norm = vals[i] ?? 0.5;
+ const raw = data.feature_min[i] + norm * (data.feature_max[i] - data.feature_min[i]);
+ div.innerHTML = `
+ <div class="row-head">
+ <span class="feat-name">${esc(name)}</span>
+ <span class="feat-val" id="v${i}">${fmt(raw, data.feature_min[i], data.feature_max[i])}</span>
+ </div>
+ <input type="range" id="sl${i}" min="0" max="1" step="0.001" value="${norm.toFixed(4)}">`;
+ }
+ list.appendChild(div);
+ if (!isAxis) {
+ const slider = document.getElementById(`sl${i}`);
+ slider.addEventListener("input", e => onSlide(i, +e.target.value));
+ slider.addEventListener("pointermove", e => {
+ if (e.buttons === 1) onSlide(i, +e.target.value);
+ });
+ }
+ });
+}
+
+function onSlide(i, norm) {
+ const lo = meta.feature_min[i], hi = meta.feature_max[i];
+ const el = document.getElementById(`v${i}`);
+ if (el) el.textContent = fmt(lo + norm * (hi - lo), lo, hi);
+
+ if (localFeatures) {
+ localFeatures[i] = norm;
+ runJSPredict();
+ }
+
+ queueFeature(i, norm);
+}
+
+
+function jsForward(x) {
+ const { W1, b1, W2, b2, W3, b3, z_offset, z_scale } = jsWeights;
+
+ const z1 = mvAdd(W1, x, b1);
+ const a1 = z1.map(v => Math.max(0, v));
+ const z2 = mvAddScaled(W2, a1, b2, L2_BIAS_SCALE);
+ const a2 = z2.map(v => Math.max(0, v));
+ const z3 = mvAddScaled(W3, a2, b3, L3_BIAS_SCALE);
+
+ const rgb = z3.map(v => Math.round(Math.max(0, Math.min(255, (v - z_offset) * z_scale))));
+ const importance = jsImportance(z1, z2);
+
+ return {
+ rgb,
+ importance,
+ activations: {
+ input: x,
+ l1: normArr(a1),
+ l2: normArr(a2),
+ l3: normArr(z3.map(v => Math.max(0, v))),
+ }
+ };
+}
+
+function mvAdd(W, x, b) {
+ return W.map((row, i) => row.reduce((s, w, j) => s + w * x[j], 0) + b[i]);
+}
+
+function mvAddScaled(W, x, b, biasScale) {
+ return W.map((row, i) => row.reduce((s, w, j) => s + w * x[j], 0) + b[i] * biasScale);
+}
+
+function normArr(arr) {
+ const m = Math.max(...arr);
+ return m > 0 ? arr.map(v => v / m) : arr.map(() => 0);
+}
+
+function jsImportance(z1, z2) {
+ const { W1, W2, W3 } = jsWeights;
+ const r1 = z1.map(v => v > 0 ? 1 : 0);
+ const r2 = z2.map(v => v > 0 ? 1 : 0);
+ const n = W1[0].length, h1 = W1.length, h2 = W2.length;
+
+ const imp = new Array(n).fill(0);
+ for (let k = 0; k < W3.length; k++) {
+ const d_a2 = W3[k].map((w, j) => w * r2[j]);
+ const d_a1 = W2[0].map((_, j) => W2.reduce((s, row, i) => s + row[j] * d_a2[i], 0) * r1[j]);
+ for (let i = 0; i < n; i++)
+ imp[i] += Math.abs(W1.reduce((s, row, j) => s + row[i] * d_a1[j], 0));
+ }
+ const mx = Math.max(...imp);
+ return mx > 0 ? imp.map(v => v / mx) : imp;
+}
+
+function runJSPredict() {
+ if (!jsWeights || !meta || !localFeatures) return;
+ const n = meta.n_features;
+ const x = localFeatures.slice(0, n);
+ x[meta.axis_x ?? 0] = probeX;
+ x[meta.axis_y ?? 1] = probeY;
+ const result = jsForward(x);
+ drawDiagram(result.activations, result.rgb);
+ updateSwatch(result.rgb);
+ updateImportance(result.importance);
+}
+
+//canvas drawing
+
+function themeColors() {
+ return isDark ? {
+ bg: "#0d0d0d", colBg: "#111",
+ conn: "rgba(75,142,240,0.04)", flow: "rgba(75,142,240,0.07)",
+ label: "#444", size: "#252525",
+ barLo: [18, 18, 18], barHi: [75, 142, 240],
+ } : {
+ bg: "#eeeef0", colBg: "#e2e2e4",
+ conn: "rgba(56,120,208,0.05)", flow: "rgba(56,120,208,0.1)",
+ label: "#999", size: "#ccc",
+ barLo: [205, 205, 210], barHi: [56, 120, 208],
+ };
+}
+
+function drawEmpty() {
+ const t = themeColors();
+ ctx.fillStyle = t.bg;
+ ctx.fillRect(0, 0, CW, CH);
+ ["Input","H1","H2","Output"].forEach((lbl, i) => {
+ ctx.fillStyle = t.colBg;
+ ctx.fillRect(COL_X[i], Y0, BAR_W, BAR_H);
+ if (i < 3) { ctx.fillStyle = t.bg; ctx.fillRect(COL_X[i] + BAR_W, Y0, COL_X[i+1] - COL_X[i] - BAR_W, BAR_H); }
+ ctx.fillStyle = t.label; ctx.font = "10px system-ui"; ctx.textAlign = "center";
+ ctx.fillText(lbl, COL_X[i] + BAR_W / 2, 18);
+ });
+}
+
+function drawDiagram(acts, rgb) {
+ const t = themeColors();
+ ctx.clearRect(0, 0, CW, CH);
+ ctx.fillStyle = t.bg;
+ ctx.fillRect(0, 0, CW, CH);
+
+ const layers = [
+ { data: acts.input, label: "Input" },
+ { data: acts.l1, label: "H1" },
+ { data: acts.l2, label: "H2" },
+ { data: acts.l3, label: "Output" },
+ ];
+
+ // connectors
+ for (let i = 0; i < 3; i++) {
+ const x1 = COL_X[i] + BAR_W, x2 = COL_X[i + 1];
+ ctx.fillStyle = t.conn;
+ ctx.fillRect(x1, Y0, x2 - x1, BAR_H);
+ ctx.strokeStyle = t.flow; ctx.lineWidth = 1;
+ for (let j = 1; j <= 5; j++) {
+ const y = Y0 + BAR_H * j / 6;
+ ctx.beginPath(); ctx.moveTo(x1, y); ctx.lineTo(x2, y); ctx.stroke();
+ }
+ }
+
+ // layer columns
+ layers.forEach((layer, li) => {
+ const n = layer.data.length;
+ const bh = BAR_H / n;
+ ctx.fillStyle = t.colBg;
+ ctx.fillRect(COL_X[li], Y0, BAR_W, BAR_H);
+
+ layer.data.forEach((v, j) => {
+ const y = Y0 + j * bh;
+ const h = Math.max(1, bh - 0.8);
+ const w = Math.max(2, BAR_W * v);
+ ctx.fillStyle = barColor(v, li === 3, j, t);
+ ctx.fillRect(COL_X[li], y, w, h);
+ });
+
+ ctx.fillStyle = t.label; ctx.font = "10px system-ui"; ctx.textAlign = "center";
+ ctx.fillText(layer.label, COL_X[li] + BAR_W / 2, 18);
+ });
+
+ // neuron counts
+ [acts.input.length, acts.l1.length, acts.l2.length, 3].forEach((n, i) => {
+ ctx.fillStyle = t.size; ctx.font = "9px system-ui"; ctx.textAlign = "center";
+ ctx.fillText(n, COL_X[i] + BAR_W / 2, CH - 4);
+ });
+}
+
+function barColor(v, isOutput, j, t) {
+ if (isOutput) {
+ const ch = [[220,60,60],[45,185,65],[60,105,230]][j] ?? [180,180,180];
+ if (!isDark) {
+ const base = 208;
+ return `rgb(${Math.round(base - (base - ch[0]) * v)},${Math.round(base - (base - ch[1]) * v)},${Math.round(base - (base - ch[2]) * v)})`;
+ }
+ return `rgba(${ch[0]},${ch[1]},${ch[2]},${0.1 + 0.9 * v})`;
+ }
+ const p = Math.pow(v, 0.65);
+ const lo = t.barLo, hi = t.barHi;
+ return `rgb(${Math.round(lo[0] + p*(hi[0]-lo[0]))},${Math.round(lo[1] + p*(hi[1]-lo[1]))},${Math.round(lo[2] + p*(hi[2]-lo[2]))})`;
+}
+
+
+function updateSwatch(rgb) {
+ document.getElementById("swatch").style.background = `rgb(${rgb[0]},${rgb[1]},${rgb[2]})`;
+ document.getElementById("rgb-text").textContent = `rgb(${rgb.join(", ")})`;
+ document.getElementById("hex-text").textContent = "#" + rgb.map(v => v.toString(16).padStart(2,"0")).join("").toUpperCase();
+
+ const nc = document.getElementById("nearest-class");
+ const nearest = nearestClassName(rgb);
+ nc.textContent = nearest ? `≈ ${nearest}` : "";
+}
+
+function nearestClassName(rgb) {
+ const names = Object.keys(classColours);
+ if (names.length === 0) return null;
+ let best = null, bestDist = Infinity;
+ for (const name of names) {
+ const c = classColours[name];
+ const d = (rgb[0]-c[0])**2 + (rgb[1]-c[1])**2 + (rgb[2]-c[2])**2;
+ if (d < bestDist) { bestDist = d; best = name; }
+ }
+ return best;
+}
+
+function buildImpList(names) {
+ const list = document.getElementById("imp-list");
+ list.innerHTML = "";
+ names.forEach((name, i) => {
+ list.innerHTML += `
+ <div class="imp-row">
+ <span class="imp-name" title="${esc(name)}">${esc(name)}</span>
+ <div class="imp-track"><div class="imp-fill" id="imp-${i}"></div></div>
+ <span class="imp-val" id="impv-${i}">—</span>
+ </div>`;
+ });
+}
+
+function updateImportance(imp) {
+ imp.forEach((v, i) => {
+ const bar = document.getElementById(`imp-${i}`);
+ const val = document.getElementById(`impv-${i}`);
+ if (bar) bar.style.width = (v * 100).toFixed(1) + "%";
+ if (val) val.textContent = v.toFixed(2);
+ });
+}
+
+
+function buildLegend() {
+ const list = document.getElementById("legend-list");
+ const names = Object.keys(classColours);
+ if (names.length === 0) {
+ list.innerHTML = `<span class="legend-empty">—</span>`;
+ return;
+ }
+ list.innerHTML = names.map(name => {
+ const c = classColours[name];
+ return `
+ <div class="legend-row">
+ <div class="legend-swatch" style="background: rgb(${c[0]},${c[1]},${c[2]})"></div>
+ <span class="legend-name" title="${esc(name)}">${esc(name)}</span>
+ </div>`;
+ }).join("");
+}
+
+function setStatus(cls, txt) {
+ document.getElementById("dot").className = "dot " + cls;
+ const s = document.getElementById("status-text");
+ s.textContent = txt; s.className = cls;
+}
+function showError(msg) {
+ const b = document.getElementById("error-box");
+ b.textContent = msg; b.style.display = "block";
+}
+function resetBtn() {
+ const b = document.getElementById("train-btn");
+ b.disabled = false; b.classList.remove("training"); b.textContent = "Train";
+}
+function esc(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function fmt(v, lo, hi) {
+ const span = hi - lo;
+ return v.toFixed(!span ? 2 : span > 1000 ? 0 : span > 10 ? 1 : 3);
+}
+function fmtRaw(v, lo, hi) {
+ return v.toFixed((hi-lo) > 1000 ? 0 : (hi-lo) > 10 ? 1 : 3);
+}
+
+(async () => {
+ const d = await fetch("/status").then(r => r.json());
+ if (d.state === "training") { setStatus("training", "training…"); pollTraining(); }
+ else if (d.state === "ready") onReady(d);
+})();
+</script>
+</body>
+</html>
